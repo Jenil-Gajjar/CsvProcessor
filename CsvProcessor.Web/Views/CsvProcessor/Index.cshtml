@@ -1,0 +1,12 @@
+<form asp-action="Upload" class="container" enctype="multipart/form-data">
+    <div class="row">
+        <div class="col text-center">
+            <input type="file" id="file" name="file" accept=".csv" required>
+        </div>
+        <div class="col-12 text-center">
+            <button class="btn btn-success" type="submit">Submit</button>
+        </div>
+    </div>
+</form>
+
+<div class="text-danger text-center">@ViewBag.Message</div>
