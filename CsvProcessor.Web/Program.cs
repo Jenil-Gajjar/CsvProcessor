@@ -13,7 +13,9 @@ builder.Services.AddScoped<IVariantRepository, VariantRepository>();
 builder.Services.AddScoped<IShippingRepository, ShippingRepository>();
 builder.Services.AddScoped<IInventoryRepository, InventoryRepository>();
 
+builder.Services.AddHttpClient<IImageService, ImageService>();
 builder.Services.AddScoped<ICsvProcessorService, CsvProcessorService>();
+builder.Services.AddScoped<IImageService, ImageService>();
 
 
 var app = builder.Build();

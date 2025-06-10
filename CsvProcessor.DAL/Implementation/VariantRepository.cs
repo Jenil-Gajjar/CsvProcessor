@@ -32,7 +32,6 @@ public class VariantRepository : IVariantRepository
                 int variantTypeId = await conn.ExecuteScalarAsync<int>("SELECT public.fn_variant_type_upsert(@p_type_name)", new { p_type_name = variantType });
 
                 await conn.ExecuteAsync("INSERT INTO public.product_variants(product_id, variant_type_id, variant_value) Values(@productid,@variantTypeId,@variantValue)", new { productid, variantTypeId, variantValue });
-
             }
         }
 

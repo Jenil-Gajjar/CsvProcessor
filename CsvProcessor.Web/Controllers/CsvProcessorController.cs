@@ -22,10 +22,10 @@ public class CsvProcessorController : Controller
 
         var content = new StringBuilder();
         content.AppendLine($"Total Time Taken:{stopwatch.Elapsed}");
-        
+
         report.Messages.ForEach(e => content.AppendLine(e));
         var fileName = Path.GetFileNameWithoutExtension(file.FileName);
 
-        return File(Encoding.UTF8.GetBytes(content.ToString()), "text/plain", $"{fileName}_Report.txt");
+        return File(Encoding.UTF8.GetBytes(content.ToString()), "text/plain", $"{fileName}_report.txt");
     }
 }

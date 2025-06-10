@@ -68,7 +68,7 @@ public partial class CsvProcessorContext : DbContext
         {
             entity.HasKey(e => e.HistoryId).HasName("price_history_pkey");
 
-            entity.Property(e => e.ChangedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
 
             entity.HasOne(d => d.Product).WithMany(p => p.PriceHistories)
                 .OnDelete(DeleteBehavior.Cascade)
@@ -102,9 +102,7 @@ public partial class CsvProcessorContext : DbContext
 
             entity.Property(e => e.IsPrimary).HasDefaultValueSql("false");
 
-            entity.HasOne(d => d.Product).WithMany(p => p.ProductImages)
-                .OnDelete(DeleteBehavior.Cascade)
-                .HasConstraintName("product_images_product_id_fkey");
+            entity.HasOne(d => d.Product).WithMany(p => p.ProductImages).HasConstraintName("product_images_product_id_fkey");
         });
 
         modelBuilder.Entity<ProductVariant>(entity =>

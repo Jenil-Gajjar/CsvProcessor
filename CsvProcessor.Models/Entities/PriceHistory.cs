@@ -24,8 +24,8 @@ public partial class PriceHistory
     [Precision(10, 2)]
     public decimal? NewPrice { get; set; }
 
-    [Column("changed_at", TypeName = "timestamp without time zone")]
-    public DateTime? ChangedAt { get; set; }
+    [Column("updated_at", TypeName = "timestamp without time zone")]
+    public DateTime? UpdatedAt { get; set; }
 
     [ForeignKey("ProductId")]
     [InverseProperty("PriceHistories")]

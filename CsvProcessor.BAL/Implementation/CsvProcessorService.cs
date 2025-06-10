@@ -1,12 +1,10 @@
 using System.Globalization;
-using System.Text.RegularExpressions;
 using CsvHelper;
 using CsvHelper.Configuration;
 using CsvProcessor.BAL.Interface;
 using CsvProcessor.DAL.Interface;
 using CsvProcessor.Models.DTOs;
 using Microsoft.AspNetCore.Http;
-
 namespace CsvProcessor.BAL.Implementation;
 
 public class CsvProcessorService : ICsvProcessorService
@@ -16,10 +14,12 @@ public class CsvProcessorService : ICsvProcessorService
     private readonly IBrandRepository _brandRepository;
     private readonly IVariantRepository _variantRepository;
     private readonly IShippingRepository _shippingRepository;
-
     private readonly IInventoryRepository _inventoryRepository;
 
-    public CsvProcessorService(IProductRepository productRepository, ICategoryRepository categoryRepository, IBrandRepository brandRepository, IVariantRepository variantRepository, IShippingRepository shippingRepository, IInventoryRepository inventoryRepository)
+    private readonly IImageService _imageService;
+
+
+    public CsvProcessorService(IProductRepository productRepository, ICategoryRepository categoryRepository, IBrandRepository brandRepository, IVariantRepository variantRepository, IShippingRepository shippingRepository, IInventoryRepository inventoryRepository, IImageService imageService)
     {
         _productRepository = productRepository;
         _categoryRepository = categoryRepository;
@@ -27,6 +27,7 @@ public class CsvProcessorService : ICsvProcessorService
         _variantRepository = variantRepository;
         _shippingRepository = shippingRepository;
         _inventoryRepository = inventoryRepository;
+        _imageService = imageService;
     }
 
 
@@ -58,34 +59,68 @@ public class CsvProcessorService : ICsvProcessorService
                 }
                 records.Add(dict);
             }
-            for (int i = 0; i < records.Count; i++)
+            int i = 1;
+            var options = new ParallelOptions()
             {
-                var dict = records[i];
+                MaxDegreeOfParallelism = Environment.ProcessorCount - 1
+            };
+            await Parallel.ForEachAsync(records, options, async (dict, cancellationToken) =>
+            {
                 try
                 {
                     var dimensions = dict["dimensions_cm"].ToString();
-                    if (!IsValidDimention(dimensions)) throw new Exception($"{i + 1}:Invalid dimensions. Use the format LxWxH");
+                    if (!IsValidDimention(dimensions)) throw new Exception($"{i++}:Invalid dimensions. Use the format LxWxH");
 
                     var hasImage = dict.Keys.Any(k => k.StartsWith("image_url") && !string.IsNullOrWhiteSpace(dict[k]?.ToString()));
+                    if (!hasImage) throw new Exception($"{i++}:At least one image is required");
 
-                    if (!hasImage) throw new Exception($"{i + 1}:At least one image is required");
+                    if (decimal.TryParse(dict["base_price"].ToString(), out var basePrice))
+                    {
+                        if (basePrice <= 0)
+                        {
+                            throw new Exception($"{i++}:Base Price is not postitive");
+                        }
+                    }
+                    else
+                    {
+                        throw new Exception($"{i++}:Base Price is not In Correct Format");
+                    }
+                    if (decimal.TryParse(dict["weight_kg"].ToString(), out var weightKg))
+                    {
+                        if (weightKg <= 0)
+                        {
+                            throw new Exception($"{i++}:Weight is not postitive");
+                        }
+                    }
+                    else
+                    {
+                        throw new Exception($"{i++}:Weight is not In Correct Format");
+                    }
 
-                    var productid = await _productRepository.UpsertProductAsync(dict);
+                    var productid = await _productRepository.UpsertProductAsync(dict).ConfigureAwait(false);
 
-                    await _categoryRepository.InsertCategoryAsync(dict["category_path"].ToString()!, productid);
-                    await _brandRepository.InsertBrandAsync(dict["brand_name"].ToString()!, productid);
-                    await _shippingRepository.InsertShippingClassAsync(dict["shipping_class"].ToString()!, productid);
-                    await _variantRepository.SyncVariantAsync(dict, productid);
-                    await _inventoryRepository.SyncInventoryAsync(dict, productid);
+                    string shippingClass = string.IsNullOrWhiteSpace(dict["shipping_class"].ToString()) ? "Standard" : dict["shipping_class"].ToString()!;
+                    string brandName = dict["brand_name"].ToString()!;
+                    string categoryPath = dict["category_path"].ToString()!;
+
+
+                    await _categoryRepository.InsertCategoryAsync(categoryPath, productid).ConfigureAwait(false);
+                    await _brandRepository.InsertBrandAsync(brandName, productid).ConfigureAwait(false);
+                    await _shippingRepository.InsertShippingClassAsync(shippingClass, productid).ConfigureAwait(false);
+                    await _variantRepository.SyncVariantAsync(dict, productid).ConfigureAwait(false);
+                    await _inventoryRepository.SyncInventoryAsync(dict, productid).ConfigureAwait(false);
+                    await _imageService.InsertImagesAsync(dict, productid).ConfigureAwait(false);
 
                     summary.SuccessCount++;
-                    summary.Messages.Add($"{i + 1}:Record Saved Successfully!");
+                    summary.Messages.Add($"{i++}:Record Saved Successfully!");
+
                 }
                 catch (Exception e)
                 {
                     summary.Messages.Add(e.Message);
                 }
-            }
+            });
+
 
         }
         catch (Exception e)
@@ -95,5 +130,16 @@ public class CsvProcessorService : ICsvProcessorService
         return summary;
     }
 
-    private bool IsValidDimention(string? value) => Regex.IsMatch(value ?? "", @"^\d+x\d+x\d+$");
+    private static bool IsValidDimention(string? value)
+    {
+        var dimensions = value?.Split("x");
+        if (dimensions == null || dimensions.Length != 3) return false;
+
+        foreach (var dimension in dimensions)
+        {
+            if (!decimal.TryParse(dimension, out var a)) return false;
+        }
+        return true;
+
+    }
 }

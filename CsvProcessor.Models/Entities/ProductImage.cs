@@ -14,18 +14,15 @@ public partial class ProductImage
     public int ImageId { get; set; }
 
     [Column("product_id")]
-    public int? ProductId { get; set; }
+    public int ProductId { get; set; }
 
-    [Column("image_url")]
-    public string ImageUrl { get; set; } = null!;
+    [Column("image_path")]
+    public string ImagePath { get; set; } = null!;
 
     [Column("is_primary")]
     public bool? IsPrimary { get; set; }
 
-    [Column("display_order")]
-    public int? DisplayOrder { get; set; }
-
     [ForeignKey("ProductId")]
     [InverseProperty("ProductImages")]
-    public virtual Product? Product { get; set; }
+    public virtual Product Product { get; set; } = null!;
 }
