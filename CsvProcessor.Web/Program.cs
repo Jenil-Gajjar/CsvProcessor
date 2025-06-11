@@ -2,9 +2,9 @@ using CsvProcessor.BAL.Interface;
 using CsvProcessor.BAL.Implementation;
 using CsvProcessor.DAL.Interface;
 using CsvProcessor.DAL.Implementation;
+using CsvProcessor.BAL.Helper;
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
 builder.Services.AddControllersWithViews();
 builder.Services.AddScoped<IProductRepository, ProductRepository>();
 builder.Services.AddScoped<ICategoryRepository, CategoryRepository>();
@@ -13,6 +13,7 @@ builder.Services.AddScoped<IVariantRepository, VariantRepository>();
 builder.Services.AddScoped<IShippingRepository, ShippingRepository>();
 builder.Services.AddScoped<IInventoryRepository, InventoryRepository>();
 
+// builder.Services.AddHostedService<ThumbnailWorker>();
 builder.Services.AddHttpClient<IImageService, ImageService>();
 builder.Services.AddScoped<ICsvProcessorService, CsvProcessorService>();
 builder.Services.AddScoped<IImageService, ImageService>();

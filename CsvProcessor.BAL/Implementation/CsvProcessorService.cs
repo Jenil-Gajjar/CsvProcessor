@@ -46,6 +46,7 @@ public class CsvProcessorService : ICsvProcessorService
             });
             csv.Read();
             csv.ReadHeader();
+            int i = 1;
             List<Dictionary<string, object>> records = new();
             while (csv.Read())
             {
@@ -57,70 +58,76 @@ public class CsvProcessorService : ICsvProcessorService
                         dict[header] = csv.GetField(header)!;
                     }
                 }
-                records.Add(dict);
-            }
-            int i = 1;
-            var options = new ParallelOptions()
-            {
-                MaxDegreeOfParallelism = Environment.ProcessorCount - 1
-            };
-            await Parallel.ForEachAsync(records, options, async (dict, cancellationToken) =>
-            {
                 try
                 {
                     var dimensions = dict["dimensions_cm"].ToString();
-                    if (!IsValidDimention(dimensions)) throw new Exception($"{i++}:Invalid dimensions. Use the format LxWxH");
+                    if (!IsValidDimention(dimensions)) throw new Exception($"Row {i++}:Invalid dimensions. Use the format LxWxH");
 
                     var hasImage = dict.Keys.Any(k => k.StartsWith("image_url") && !string.IsNullOrWhiteSpace(dict[k]?.ToString()));
-                    if (!hasImage) throw new Exception($"{i++}:At least one image is required");
+                    if (!hasImage) throw new Exception($"Row {i++}:At least one image is required");
 
                     if (decimal.TryParse(dict["base_price"].ToString(), out var basePrice))
                     {
                         if (basePrice <= 0)
                         {
-                            throw new Exception($"{i++}:Base Price is not postitive");
+                            throw new Exception($"Row {i++}:Base Price is not postitive");
                         }
                     }
                     else
                     {
-                        throw new Exception($"{i++}:Base Price is not In Correct Format");
+                        throw new Exception($"Row {i++}:Base Price is not In Correct Format");
                     }
                     if (decimal.TryParse(dict["weight_kg"].ToString(), out var weightKg))
                     {
                         if (weightKg <= 0)
                         {
-                            throw new Exception($"{i++}:Weight is not postitive");
+                            throw new Exception($"Row {i++}:Weight is not postitive");
                         }
                     }
                     else
                     {
-                        throw new Exception($"{i++}:Weight is not In Correct Format");
+                        throw new Exception($"Row {i++}:Weight is not In Correct Format");
                     }
-
-                    var productid = await _productRepository.UpsertProductAsync(dict).ConfigureAwait(false);
-
-                    string shippingClass = string.IsNullOrWhiteSpace(dict["shipping_class"].ToString()) ? "Standard" : dict["shipping_class"].ToString()!;
-                    string brandName = dict["brand_name"].ToString()!;
-                    string categoryPath = dict["category_path"].ToString()!;
-
-
-                    await _categoryRepository.InsertCategoryAsync(categoryPath, productid).ConfigureAwait(false);
-                    await _brandRepository.InsertBrandAsync(brandName, productid).ConfigureAwait(false);
-                    await _shippingRepository.InsertShippingClassAsync(shippingClass, productid).ConfigureAwait(false);
-                    await _variantRepository.SyncVariantAsync(dict, productid).ConfigureAwait(false);
-                    await _inventoryRepository.SyncInventoryAsync(dict, productid).ConfigureAwait(false);
-                    await _imageService.InsertImagesAsync(dict, productid).ConfigureAwait(false);
-
-                    summary.SuccessCount++;
-                    summary.Messages.Add($"{i++}:Record Saved Successfully!");
+                    records.Add(dict);
+                    i++;
 
                 }
                 catch (Exception e)
                 {
                     summary.Messages.Add(e.Message);
                 }
-            });
+            }
 
+            var options = new ParallelOptions()
+            {
+                MaxDegreeOfParallelism = Environment.ProcessorCount - 1
+            };
+            foreach (var batch in records.Chunk(1000))
+            {
+                var SkuIdDict = await _productRepository.BulkUpsertProductAsync(batch);
+
+                await Parallel.ForEachAsync(batch, options, async (dict, _) =>
+                {
+                    var sku = dict["product_sku"]?.ToString()!;
+
+                    if (!SkuIdDict.TryGetValue(sku, out var productid)) return;
+                    string shippingClass = string.IsNullOrWhiteSpace(dict["shipping_class"].ToString()) ? "Standard" : dict["shipping_class"].ToString()!;
+                    string brandName = dict["brand_name"].ToString()!;
+                    string categoryPath = dict["category_path"].ToString()!;
+
+                    await Task.WhenAll(
+                        _categoryRepository.InsertCategoryAsync(categoryPath, productid),
+                        _brandRepository.InsertBrandAsync(brandName, productid),
+                        _shippingRepository.InsertShippingClassAsync(shippingClass, productid),
+                        _variantRepository.SyncVariantAsync(dict, productid),
+                        _inventoryRepository.SyncInventoryAsync(dict, productid),
+                        _imageService.InsertImagesAsync(dict, productid)
+                        ).ConfigureAwait(false);
+
+                    summary.Messages.Add($"Record Id:{productid} Proceeded Successfully!");
+
+                });
+            }
 
         }
         catch (Exception e)
@@ -140,6 +147,6 @@ public class CsvProcessorService : ICsvProcessorService
             if (!decimal.TryParse(dimension, out var a)) return false;
         }
         return true;
-
     }
+
 }

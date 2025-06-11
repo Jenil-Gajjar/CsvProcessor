@@ -1,4 +1,6 @@
+using System.Text.Json;
 using CsvProcessor.DAL.Interface;
+using CsvProcessor.Models.DTOs;
 using Dapper;
 using Microsoft.Extensions.Configuration;
 using Npgsql;
@@ -32,4 +34,29 @@ public class ProductRepository : IProductRepository
         return await conn.ExecuteScalarAsync<int>(query, parameters);
     }
 
+
+
+    public async Task<Dictionary<string, int>> BulkUpsertProductAsync(IEnumerable<Dictionary<string, object>> records)
+    {
+
+
+
+        string jsonData = JsonSerializer.Serialize(records);
+
+        try
+        {
+
+            using var conn = new NpgsqlConnection(_conn);
+            var result = await conn.QueryAsync<(int id, string Sku, string Operation)>("SELECT * from public.fn_product_bulk_upsert(@data::jsonb)", new { data = jsonData });
+            return result.ToDictionary(t => t.Sku, t => t.id);
+        }
+        catch (Exception e)
+        {
+
+            Console.WriteLine(e.Message);
+            Console.WriteLine("Error While Saving Data to Db");
+            return new Dictionary<string, int>();
+        }
+
+    }
 }

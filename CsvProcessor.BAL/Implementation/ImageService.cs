@@ -4,14 +4,14 @@ using Npgsql;
 using System.Security.Cryptography;
 using System.Text;
 using Dapper;
+using System.Diagnostics;
 
 namespace CsvProcessor.BAL.Implementation;
 
 public class ImageService : IImageService
 {
     private readonly string _conn;
-
-    private readonly string _imageDir = Path.Combine("wwwroot", "images");
+    private readonly static string _imageDir = Path.Combine("wwwroot", "images");
     private readonly HttpClient _httpClient;
     public ImageService(IConfiguration configuration, HttpClient httpClient)
     {
@@ -24,36 +24,37 @@ public class ImageService : IImageService
     )
     {
         using var conn = new NpgsqlConnection(_conn);
-        bool is_primary = true;
-        foreach (var kv in dict)
-        {
-            if (kv.Key.StartsWith("image_url") && !string.IsNullOrWhiteSpace(kv.Value?.ToString()))
+        var urls = dict.Where(kv => kv.Key.StartsWith("image_url") && !string.IsNullOrWhiteSpace(kv.Value?.ToString())).Select((kv, ix) => (url: kv.Value?.ToString(), is_primary: ix == 0));
+
+        Stopwatch imageStopWatch = Stopwatch.StartNew();
+        await Parallel.ForEachAsync(urls, async (url, _) =>
+        {   
+            string hash = GenerateHash(url.url!);
+            string imageFileName = $"{hash[..16]}.jpg";
+            string fullPath = Path.Combine(_imageDir, imageFileName);
+            bool is_primary = url.is_primary;
+
+            if (!File.Exists(fullPath))
             {
-                string url = kv.Value?.ToString()!;
-                string hash = GenerateHash(url);
-                string imageFileName = $"{hash[..16]}.jpg";
-                string fullPath = Path.Combine(_imageDir, imageFileName);
-                if (!File.Exists(fullPath))
+                try
                 {
-                    var response = await _httpClient.GetAsync(url);
+                    var response = await _httpClient.GetAsync(url.url);
                     if (response.IsSuccessStatusCode)
                     {
-                        try
-                        {
-                            byte[] imageBytes = await response.Content.ReadAsByteArrayAsync();
-                            await File.WriteAllBytesAsync(fullPath, imageBytes);
-                        }
-                        catch (Exception e)
-                        {
-                            Console.WriteLine(e.Message);
-                            continue;
-                        }
+                        byte[] imageBytes = await response.Content.ReadAsByteArrayAsync(_);
+                        await File.WriteAllBytesAsync(fullPath, imageBytes, _);
+                        // ThumbnailQueue.thumbnailQueue.Enqueue(fullPath);
                     }
                     else
                     {
                         Console.WriteLine("Image Not Found!");
-                        continue;
+                        return;
                     }
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine(e.Message);
+                    return;
                 }
                 await conn.ExecuteAsync("select fn_product_image_insert(@p_product_id, @p_image_path, @p_is_primary)", new
                 {
@@ -62,7 +63,9 @@ public class ImageService : IImageService
                     p_is_primary = is_primary,
                 });
             }
-        }
+        });
+
+        imageStopWatch.Stop();
     }
 
     private static string GenerateHash(string input)
