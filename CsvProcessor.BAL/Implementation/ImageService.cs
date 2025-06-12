@@ -28,7 +28,7 @@ public class ImageService : IImageService
 
         Stopwatch imageStopWatch = Stopwatch.StartNew();
         await Parallel.ForEachAsync(urls, async (url, _) =>
-        {   
+        {
             string hash = GenerateHash(url.url!);
             string imageFileName = $"{hash[..16]}.jpg";
             string fullPath = Path.Combine(_imageDir, imageFileName);
@@ -38,7 +38,7 @@ public class ImageService : IImageService
             {
                 try
                 {
-                    var response = await _httpClient.GetAsync(url.url);
+                    var response = await _httpClient.GetAsync(url.url, _);
                     if (response.IsSuccessStatusCode)
                     {
                         byte[] imageBytes = await response.Content.ReadAsByteArrayAsync(_);
@@ -79,6 +79,12 @@ public class ImageService : IImageService
             hashString.Append(b.ToString("x2"));
         }
         return hashString.ToString();
+    }
+
+    public async Task BulkInsertImageAsync(IEnumerable<IDictionary<string, object>> records,
+    IDictionary<string, int> SkuIdDict)
+    {
+
     }
 
 }

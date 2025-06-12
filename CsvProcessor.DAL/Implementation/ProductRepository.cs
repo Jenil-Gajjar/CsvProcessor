@@ -45,9 +45,8 @@ public class ProductRepository : IProductRepository
 
         try
         {
-
             using var conn = new NpgsqlConnection(_conn);
-            var result = await conn.QueryAsync<(int id, string Sku, string Operation)>("SELECT * from public.fn_product_bulk_upsert(@data::jsonb)", new { data = jsonData });
+            var result = await conn.QueryAsync<(int id, string Sku)>("SELECT * from public.fn_product_bulk_upsert(@data::jsonb)", new { data = jsonData });
             return result.ToDictionary(t => t.Sku, t => t.id);
         }
         catch (Exception e)

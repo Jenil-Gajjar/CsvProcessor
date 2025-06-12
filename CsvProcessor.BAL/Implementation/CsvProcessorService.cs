@@ -106,27 +106,80 @@ public class CsvProcessorService : ICsvProcessorService
             {
                 var SkuIdDict = await _productRepository.BulkUpsertProductAsync(batch);
 
-                await Parallel.ForEachAsync(batch, options, async (dict, _) =>
+                // await Parallel.ForEachAsync(batch, options, async (dict, _) =>
+                // {
+
+                // if (!SkuIdDict.TryGetValue(sku, out var productid)) return;
+                // string shippingClass = string.IsNullOrWhiteSpace(dict["shipping_class"].ToString()) ? "Standard" : dict["shipping_class"].ToString()!;
+                // string brandName = dict["brand_name"].ToString()!;
+                // string categoryPath = dict["category_path"].ToString()!;
+
+                // await Task.WhenAll(
+                try
                 {
-                    var sku = dict["product_sku"]?.ToString()!;
 
-                    if (!SkuIdDict.TryGetValue(sku, out var productid)) return;
-                    string shippingClass = string.IsNullOrWhiteSpace(dict["shipping_class"].ToString()) ? "Standard" : dict["shipping_class"].ToString()!;
-                    string brandName = dict["brand_name"].ToString()!;
-                    string categoryPath = dict["category_path"].ToString()!;
+                    await _categoryRepository.BulkInsertCategoryAsync(batch, SkuIdDict).ConfigureAwait(false);
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine("Category :");
+                    Console.WriteLine(e.Message);
+                }
+                try
+                {
 
-                    await Task.WhenAll(
-                        _categoryRepository.InsertCategoryAsync(categoryPath, productid),
-                        _brandRepository.InsertBrandAsync(brandName, productid),
-                        _shippingRepository.InsertShippingClassAsync(shippingClass, productid),
-                        _variantRepository.SyncVariantAsync(dict, productid),
-                        _inventoryRepository.SyncInventoryAsync(dict, productid),
-                        _imageService.InsertImagesAsync(dict, productid)
-                        ).ConfigureAwait(false);
+                    await _brandRepository.BulkInsertBrandAsync(batch, SkuIdDict).ConfigureAwait(false);
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine("Brand :");
+                    Console.WriteLine(e.Message);
+                }
 
-                    summary.Messages.Add($"Record Id:{productid} Proceeded Successfully!");
+                try
+                {
+                    await _shippingRepository.BulkInsertShippingClassAsync(batch, SkuIdDict).ConfigureAwait(false);
 
-                });
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine("Shipping Class :");
+                    Console.WriteLine(e.Message);
+                }
+                try
+                {
+                    await _variantRepository.BulkInsertVariantAsync(batch, SkuIdDict).ConfigureAwait(false);
+
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine("Variant:");
+                    Console.WriteLine(e.Message);
+                }
+                try
+                {
+
+                    await _inventoryRepository.BulkInsertInventoryAsync(batch, SkuIdDict).ConfigureAwait(false);
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine("Inventory:");
+                    Console.WriteLine(e.Message);
+                }
+                // );
+
+
+                // await Task.WhenAll(
+                //     _categoryRepository.InsertCategoryAsync(categoryPath, productid),
+                //     _brandRepository.InsertBrandAsync(brandName, productid),
+                //     _shippingRepository.InsertShippingClassAsync(shippingClass, productid),
+                //     _variantRepository.SyncVariantAsync(dict, productid),
+                //     _inventoryRepository.SyncInventoryAsync(dict, productid),
+                //     _imageService.InsertImagesAsync(dict, productid)
+                //     ).ConfigureAwait(false);
+
+
+                // });
             }
 
         }
