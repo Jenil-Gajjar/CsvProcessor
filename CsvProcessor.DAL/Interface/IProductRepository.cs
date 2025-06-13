@@ -6,6 +6,6 @@ public interface IProductRepository
 {
     public Task<int> UpsertProductAsync(IDictionary<string, object> dict);
 
-    public Task<Dictionary<string, int>> BulkUpsertProductAsync(IEnumerable<Dictionary<string, object>> records);
+    public Task<(Dictionary<string, int>, Dictionary<string, int>)> BulkUpsertProductAsync(IEnumerable<Dictionary<string, object>> records);
 
 }

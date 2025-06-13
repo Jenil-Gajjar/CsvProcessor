@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Globalization;
 using CsvHelper;
 using CsvHelper.Configuration;
@@ -15,11 +17,12 @@ public class CsvProcessorService : ICsvProcessorService
     private readonly IVariantRepository _variantRepository;
     private readonly IShippingRepository _shippingRepository;
     private readonly IInventoryRepository _inventoryRepository;
-
     private readonly IImageService _imageService;
 
+    private readonly IProductImageRepository _productImageRepository;
 
-    public CsvProcessorService(IProductRepository productRepository, ICategoryRepository categoryRepository, IBrandRepository brandRepository, IVariantRepository variantRepository, IShippingRepository shippingRepository, IInventoryRepository inventoryRepository, IImageService imageService)
+
+    public CsvProcessorService(IProductRepository productRepository, ICategoryRepository categoryRepository, IBrandRepository brandRepository, IVariantRepository variantRepository, IShippingRepository shippingRepository, IInventoryRepository inventoryRepository, IProductImageRepository productImageRepository, IImageService imageService)
     {
         _productRepository = productRepository;
         _categoryRepository = categoryRepository;
@@ -27,6 +30,7 @@ public class CsvProcessorService : ICsvProcessorService
         _variantRepository = variantRepository;
         _shippingRepository = shippingRepository;
         _inventoryRepository = inventoryRepository;
+        _productImageRepository = productImageRepository;
         _imageService = imageService;
     }
 
@@ -47,9 +51,13 @@ public class CsvProcessorService : ICsvProcessorService
             csv.Read();
             csv.ReadHeader();
             int i = 1;
+            int RowCount = 0;
+            int InsertedRecords = 0;
+            int UpdatedRecords = 0;
             List<Dictionary<string, object>> records = new();
             while (csv.Read())
             {
+                RowCount++;
                 var dict = new Dictionary<string, object>();
                 if (csv.HeaderRecord != null)
                 {
@@ -61,32 +69,32 @@ public class CsvProcessorService : ICsvProcessorService
                 try
                 {
                     var dimensions = dict["dimensions_cm"].ToString();
-                    if (!IsValidDimention(dimensions)) throw new Exception($"Row {i++}:Invalid dimensions. Use the format LxWxH");
+                    if (!IsValidDimention(dimensions)) throw new Exception($"Row {i++} {dict["product_sku"]}:Invalid dimensions. Use the format LxWxH");
 
                     var hasImage = dict.Keys.Any(k => k.StartsWith("image_url") && !string.IsNullOrWhiteSpace(dict[k]?.ToString()));
-                    if (!hasImage) throw new Exception($"Row {i++}:At least one image is required");
+                    if (!hasImage) throw new Exception($"Row {i++} {dict["product_sku"]}:At least one image is required");
 
                     if (decimal.TryParse(dict["base_price"].ToString(), out var basePrice))
                     {
                         if (basePrice <= 0)
                         {
-                            throw new Exception($"Row {i++}:Base Price is not postitive");
+                            throw new Exception($"Row {i++} {dict["product_sku"]}:Base Price is not postitive");
                         }
                     }
                     else
                     {
-                        throw new Exception($"Row {i++}:Base Price is not In Correct Format");
+                        throw new Exception($"Row {i++} {dict["product_sku"]}:Base Price is not In Correct Format");
                     }
                     if (decimal.TryParse(dict["weight_kg"].ToString(), out var weightKg))
                     {
                         if (weightKg <= 0)
                         {
-                            throw new Exception($"Row {i++}:Weight is not postitive");
+                            throw new Exception($"Row {i++} {dict["product_sku"]}:Weight is not postitive");
                         }
                     }
                     else
                     {
-                        throw new Exception($"Row {i++}:Weight is not In Correct Format");
+                        throw new Exception($"Row {i++} {dict["product_sku"]}:Weight is not In Correct Format");
                     }
                     records.Add(dict);
                     i++;
@@ -94,36 +102,24 @@ public class CsvProcessorService : ICsvProcessorService
                 }
                 catch (Exception e)
                 {
-                    summary.Messages.Add(e.Message);
+                    summary.Errors.Add(e.Message);
                 }
             }
 
-            var options = new ParallelOptions()
-            {
-                MaxDegreeOfParallelism = Environment.ProcessorCount - 1
-            };
             foreach (var batch in records.Chunk(1000))
             {
-                var SkuIdDict = await _productRepository.BulkUpsertProductAsync(batch);
+                (Dictionary<string, int> SkuIdDict, Dictionary<string, int> rec) = await _productRepository.BulkUpsertProductAsync(batch);
 
-                // await Parallel.ForEachAsync(batch, options, async (dict, _) =>
-                // {
+                InsertedRecords += rec["InsertedRecords"];
+                UpdatedRecords += rec["UpdatedRecords"];
 
-                // if (!SkuIdDict.TryGetValue(sku, out var productid)) return;
-                // string shippingClass = string.IsNullOrWhiteSpace(dict["shipping_class"].ToString()) ? "Standard" : dict["shipping_class"].ToString()!;
-                // string brandName = dict["brand_name"].ToString()!;
-                // string categoryPath = dict["category_path"].ToString()!;
-
-                // await Task.WhenAll(
                 try
                 {
-
                     await _categoryRepository.BulkInsertCategoryAsync(batch, SkuIdDict).ConfigureAwait(false);
                 }
                 catch (Exception e)
                 {
-                    Console.WriteLine("Category :");
-                    Console.WriteLine(e.Message);
+                    Console.WriteLine($"Category {e.Message}");
                 }
                 try
                 {
@@ -132,8 +128,7 @@ public class CsvProcessorService : ICsvProcessorService
                 }
                 catch (Exception e)
                 {
-                    Console.WriteLine("Brand :");
-                    Console.WriteLine(e.Message);
+                    Console.WriteLine($"Brand {e.Message}");
                 }
 
                 try
@@ -143,8 +138,7 @@ public class CsvProcessorService : ICsvProcessorService
                 }
                 catch (Exception e)
                 {
-                    Console.WriteLine("Shipping Class :");
-                    Console.WriteLine(e.Message);
+                    Console.WriteLine($"Shipping Class {e.Message}");
                 }
                 try
                 {
@@ -153,8 +147,7 @@ public class CsvProcessorService : ICsvProcessorService
                 }
                 catch (Exception e)
                 {
-                    Console.WriteLine("Variant:");
-                    Console.WriteLine(e.Message);
+                    Console.WriteLine($"Variant {e.Message}");
                 }
                 try
                 {
@@ -163,30 +156,31 @@ public class CsvProcessorService : ICsvProcessorService
                 }
                 catch (Exception e)
                 {
-                    Console.WriteLine("Inventory:");
-                    Console.WriteLine(e.Message);
+                    Console.WriteLine($"Inventory: {e.Message}");
                 }
-                // );
+                try
+                {
+                    (ConcurrentBag<ProductImageDto> set, ConcurrentDictionary<string, ConcurrentBag<string>> ImageMessageList) = await _imageService.ProcessImagesAsync(batch, SkuIdDict);
+                    await _productImageRepository.BulkInsertImagesAsync(set);
+                    ImageMessageList.Values.ToList().ForEach(summary.Errors.AddRange);
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine($"Image Service: {e.Message}");
+                }
 
-
-                // await Task.WhenAll(
-                //     _categoryRepository.InsertCategoryAsync(categoryPath, productid),
-                //     _brandRepository.InsertBrandAsync(brandName, productid),
-                //     _shippingRepository.InsertShippingClassAsync(shippingClass, productid),
-                //     _variantRepository.SyncVariantAsync(dict, productid),
-                //     _inventoryRepository.SyncInventoryAsync(dict, productid),
-                //     _imageService.InsertImagesAsync(dict, productid)
-                //     ).ConfigureAwait(false);
-
-
-                // });
             }
 
+            summary.RowCount = RowCount;
+            summary.InsertedRecords = InsertedRecords;
+            summary.UpdatedRecords = UpdatedRecords;
+            
         }
         catch (Exception e)
         {
-            summary.Messages.Add(e.Message);
+            summary.Errors.Add(e.Message);
         }
+
         return summary;
     }
 

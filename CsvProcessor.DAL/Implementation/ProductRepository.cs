@@ -36,25 +36,26 @@ public class ProductRepository : IProductRepository
 
 
 
-    public async Task<Dictionary<string, int>> BulkUpsertProductAsync(IEnumerable<Dictionary<string, object>> records)
+    public async Task<(Dictionary<string, int>, Dictionary<string, int>)> BulkUpsertProductAsync(IEnumerable<Dictionary<string, object>> records)
     {
-
-
-
         string jsonData = JsonSerializer.Serialize(records);
-
         try
         {
             using var conn = new NpgsqlConnection(_conn);
-            var result = await conn.QueryAsync<(int id, string Sku)>("SELECT * from public.fn_product_bulk_upsert(@data::jsonb)", new { data = jsonData });
-            return result.ToDictionary(t => t.Sku, t => t.id);
+            var result = await conn.QueryAsync<(int id, string Sku, bool IsInserted)>("SELECT * from public.fn_product_bulk_upsert(@data::jsonb)", new { data = jsonData });
+            Dictionary<string, int> recordCounts = new()
+            {
+                {"InsertedRecords" ,result.Count(u => u.IsInserted)},
+                {"UpdatedRecords" ,result.Count(u => !u.IsInserted)},
+            };
+            return (result.ToDictionary(t => t.Sku, t => t.id), recordCounts);
         }
         catch (Exception e)
         {
 
             Console.WriteLine(e.Message);
             Console.WriteLine("Error While Saving Data to Db");
-            return new Dictionary<string, int>();
+            throw;
         }
 
     }

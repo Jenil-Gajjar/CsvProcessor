@@ -17,13 +17,16 @@ public class CsvProcessorController : Controller
             return View(nameof(Index));
         }
         Stopwatch stopwatch = Stopwatch.StartNew();
-        var report = await _csvProcessorService.ProcessCsvAsync(file);
+        var summary = await _csvProcessorService.ProcessCsvAsync(file);
         stopwatch.Stop();
 
         var content = new StringBuilder();
         content.AppendLine($"Total Time Taken:{stopwatch.Elapsed}");
-
-        report.Messages.ForEach(e => content.AppendLine(e));
+        content.AppendLine($"Total Records:{summary.RowCount}");
+        content.AppendLine($"Total Inserted Records:{summary.InsertedRecords}");
+        content.AppendLine($"Total Updated Records:{summary.UpdatedRecords}");
+        content.AppendLine("Errors:");
+        summary.Errors.ForEach(e => content.AppendLine(e));
         var fileName = Path.GetFileNameWithoutExtension(file.FileName);
 
         return File(Encoding.UTF8.GetBytes(content.ToString()), "text/plain", $"{fileName}_report.txt");

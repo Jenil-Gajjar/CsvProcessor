@@ -12,8 +12,9 @@ builder.Services.AddScoped<IBrandRepository, BrandRepository>();
 builder.Services.AddScoped<IVariantRepository, VariantRepository>();
 builder.Services.AddScoped<IShippingRepository, ShippingRepository>();
 builder.Services.AddScoped<IInventoryRepository, InventoryRepository>();
+builder.Services.AddScoped<IProductImageRepository, ProductImageRepository>();
 
-// builder.Services.AddHostedService<ThumbnailWorker>();
+builder.Services.AddHostedService<FileDonwloaderWorker>();
 builder.Services.AddHttpClient<IImageService, ImageService>();
 builder.Services.AddScoped<ICsvProcessorService, CsvProcessorService>();
 builder.Services.AddScoped<IImageService, ImageService>();

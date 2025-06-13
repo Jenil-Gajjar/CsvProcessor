@@ -14,16 +14,6 @@ public class CategoryRepository : ICategoryRepository
         _conn = configuration.GetConnectionString("MyConnectionString")!;
     }
 
-    public async Task InsertCategoryAsync(string path, int productid)
-    {
-        using var conn = new NpgsqlConnection(_conn);
-
-        int categoryid = await conn.ExecuteScalarAsync<int>("SELECT fn_category_insert(@p_path)", new { p_path = path });
-
-        await conn.ExecuteAsync("UPDATE products SET category_id=@categoryid where product_id=@productid", new { categoryid, productid });
-
-    }
-
 
     public async Task BulkInsertCategoryAsync(IEnumerable<IDictionary<string, object>> records, IDictionary<string, int> SkuIdDict)
     {
@@ -32,7 +22,7 @@ public class CategoryRepository : ICategoryRepository
 
         var rawData = records.Where(kv => !string.IsNullOrEmpty(kv["category_path"].ToString())).Select(kv => new
         {
-            product_id = SkuIdDict.TryGetValue("product_sku", out var id) ? id : 0,
+            product_id = SkuIdDict.TryGetValue(kv["product_sku"].ToString()!, out var id) ? id : 0,
             category_path = kv["category_path"]
         });
 

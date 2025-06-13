@@ -1,0 +1,55 @@
+namespace CsvProcessor.BAL.Helper;
+using Microsoft.Extensions.Hosting;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Processing;
+
+public class FileDonwloaderWorker : BackgroundService
+{
+    private readonly static string _imageDir = Path.Combine("wwwroot", "images");
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            while (ImageProcessingQueue.ImageQueue.TryDequeue(out var imageProcessDto))
+            {
+                string filePath = imageProcessDto.ImagePath;
+                byte[]? imageBytes = imageProcessDto.ImageBytes;
+                if (imageBytes == null) continue;
+                try
+                {
+                    await File.WriteAllBytesAsync(imageProcessDto.ImagePath, imageBytes, stoppingToken);
+
+                    using var image = Image.Load(filePath);
+                    foreach (var size in new[] { ("thumb", 150), ("medium", 600) })
+                    {
+
+                        int width = size.Item2;
+                        string suffix = size.Item1;
+
+                        var ratio = width / image.Width;
+                        int height = image.Height * ratio;
+
+                        image.Mutate(x => x.Resize(new ResizeOptions
+                        {
+                            Size = new Size(width, height),
+                            Mode = ResizeMode.Max
+                        }));
+                        string ext = Path.GetExtension(filePath);
+                        string fileName = Path.GetFileNameWithoutExtension(filePath);
+                        string output = Path.Combine(_imageDir, $"{fileName}_{suffix}.{ext}");
+                        image.Save(output);
+                    }
+                }
+                catch (Exception e)
+                {
+
+                    Console.WriteLine(e.Message);
+                }
+
+            }
+            await Task.Delay(1000, stoppingToken);
+        }
+
+    }
+}

@@ -5,6 +5,9 @@ using System.Security.Cryptography;
 using System.Text;
 using Dapper;
 using System.Diagnostics;
+using CsvProcessor.Models.DTOs;
+using CsvProcessor.BAL.Helper;
+using System.Collections.Concurrent;
 
 namespace CsvProcessor.BAL.Implementation;
 
@@ -18,55 +21,7 @@ public class ImageService : IImageService
         _conn = configuration.GetConnectionString("MyConnectionString")!;
         _httpClient = httpClient;
     }
-    public async Task InsertImagesAsync(
-        IDictionary<string, object> dict,
-        int productid
-    )
-    {
-        using var conn = new NpgsqlConnection(_conn);
-        var urls = dict.Where(kv => kv.Key.StartsWith("image_url") && !string.IsNullOrWhiteSpace(kv.Value?.ToString())).Select((kv, ix) => (url: kv.Value?.ToString(), is_primary: ix == 0));
 
-        Stopwatch imageStopWatch = Stopwatch.StartNew();
-        await Parallel.ForEachAsync(urls, async (url, _) =>
-        {
-            string hash = GenerateHash(url.url!);
-            string imageFileName = $"{hash[..16]}.jpg";
-            string fullPath = Path.Combine(_imageDir, imageFileName);
-            bool is_primary = url.is_primary;
-
-            if (!File.Exists(fullPath))
-            {
-                try
-                {
-                    var response = await _httpClient.GetAsync(url.url, _);
-                    if (response.IsSuccessStatusCode)
-                    {
-                        byte[] imageBytes = await response.Content.ReadAsByteArrayAsync(_);
-                        await File.WriteAllBytesAsync(fullPath, imageBytes, _);
-                        // ThumbnailQueue.thumbnailQueue.Enqueue(fullPath);
-                    }
-                    else
-                    {
-                        Console.WriteLine("Image Not Found!");
-                        return;
-                    }
-                }
-                catch (Exception e)
-                {
-                    Console.WriteLine(e.Message);
-                    return;
-                }
-                await conn.ExecuteAsync("select fn_product_image_insert(@p_product_id, @p_image_path, @p_is_primary)", new
-                {
-                    p_product_id = productid,
-                    p_image_path = imageFileName,
-                    p_is_primary = is_primary,
-                });
-            }
-        });
-
-        imageStopWatch.Stop();
-    }
 
     private static string GenerateHash(string input)
     {
@@ -81,10 +36,113 @@ public class ImageService : IImageService
         return hashString.ToString();
     }
 
-    public async Task BulkInsertImageAsync(IEnumerable<IDictionary<string, object>> records,
+    public async Task<(ConcurrentBag<ProductImageDto>, ConcurrentDictionary<string, ConcurrentBag<string>>)> ProcessImagesAsync(IEnumerable<IDictionary<string, object>> records,
     IDictionary<string, int> SkuIdDict)
     {
+        using var conn = new NpgsqlConnection(_conn);
+        var tasks = new List<(string sku, string url, bool is_primary)>();
+        var seenUrls = new ConcurrentDictionary<string, bool>();
+        var imageList = new ConcurrentBag<ProductImageDto>();
+        var ImageMessageList = new ConcurrentDictionary<string, ConcurrentBag<string>>();
 
+        records.ToList().ForEach(record =>
+        {
+            if (!record.TryGetValue("product_sku", out var sku)) return;
+            if (string.IsNullOrEmpty(sku.ToString()) || !SkuIdDict.ContainsKey(sku.ToString()!)) return;
+
+            var urls = record.Where(kv => kv.Key.StartsWith("image_url") && !string.IsNullOrWhiteSpace(kv.Value?.ToString())).Select((kv, ix) => (sku.ToString()!, kv.Value.ToString()!, ix == 0));
+
+            if (urls != null && urls.Any())
+                tasks.AddRange(urls);
+        });
+
+        var taskList = tasks.Select(item => Task.Run(async () =>
+        {
+            string hash = GenerateHash(item.url);
+            string imageFileName = $"{hash[..16]}.jpg";
+            string fullPath = Path.Combine(_imageDir, imageFileName);
+
+            if (!seenUrls.TryAdd(item.url, true))
+            {
+                imageList.Add(new ProductImageDto
+                {
+                    product_id = SkuIdDict.TryGetValue(item.sku, out var id) ? id : 0,
+                    image_path = imageFileName,
+                    is_primary = item.is_primary
+                });
+            }
+            else
+            {
+                if (!File.Exists(fullPath))
+                {
+                    try
+                    {
+                        var response = await _httpClient.GetAsync(item.url);
+                        if (response.IsSuccessStatusCode)
+                        {
+                            byte[] ImageBytes = await response.Content.ReadAsByteArrayAsync();
+                            imageList.Add(new ProductImageDto
+                            {
+
+                                product_id = SkuIdDict.TryGetValue(item.sku, out var id) ? id : 0,
+                                image_path = imageFileName,
+                                is_primary = item.is_primary
+                            });
+                            ImageProcessingQueue.ImageQueue.Enqueue(new ImageProcessDto()
+                            {
+                                ImagePath = fullPath,
+                                ImageBytes = ImageBytes
+                            });
+                        }
+                        else
+                        {
+                            ImageMessageList.AddOrUpdate(
+                            item.sku,
+                            // Add: Create a new list if the key doesn't exist
+                            _ => new ConcurrentBag<string>() { $"{item.sku}:Failed Downloading Image from Url {item.url}" },
+                            // Update: Add the new value to the existing list
+                            (_, list) =>
+                                {
+
+                                    list.Add($"{item.sku}:Failed Downloading Image from Url {item.url}");
+                                    return list;
+                                }
+                            );
+
+                        }
+                    }
+                    catch (Exception e)
+                    {
+                        ImageMessageList.AddOrUpdate(
+                            item.sku,
+                            _ => new ConcurrentBag<string>() { $"{item.sku}:Failed Downloading Image from Url {item.url}" },
+                            (_, list) =>
+                            {
+                                lock (list)
+                                {
+                                    list.Add($"{item.sku}:Failed Downloading Image from Url {item.url}");
+                                }
+                                return list;
+                            }
+                        );
+                        Console.WriteLine(e.Message);
+                    }
+                }
+                else
+                {
+                    imageList.Add(new ProductImageDto
+                    {
+                        product_id = SkuIdDict.TryGetValue(item.sku, out var id) ? id : 0,
+                        image_path = imageFileName,
+                        is_primary = item.is_primary
+                    });
+                }
+            }
+        }));
+
+
+        await Task.WhenAll(taskList);
+        return (imageList, ImageMessageList);
     }
 
 }

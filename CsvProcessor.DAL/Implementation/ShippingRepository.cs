@@ -14,13 +14,7 @@ public class ShippingRepository : IShippingRepository
     {
         _conn = configuration.GetConnectionString("MyConnectionString")!;
     }
-    public async Task InsertShippingClassAsync(string className, int productid)
-    {
-        using var conn = new NpgsqlConnection(_conn);
-
-        int shippingClassId = await conn.ExecuteScalarAsync<int>("SELECT fn_shipping_class_insert(@p_class_name)", new { p_class_name = className });
-        await conn.ExecuteAsync("UPDATE products SET shipping_class_id=@shippingClassId WHERE product_id=@productid", new { shippingClassId, productid });
-    }
+ 
 
     public async Task BulkInsertShippingClassAsync(IEnumerable<IDictionary<string, object>> records, IDictionary<string, int> SkuIdDict)
     {
@@ -28,7 +22,7 @@ public class ShippingRepository : IShippingRepository
 
         var rawData = records.Where(kv => !string.IsNullOrEmpty(kv["shipping_class"].ToString())).Select(kv => new
         {
-            product_id = SkuIdDict.TryGetValue("product_sku", out var id) ? id : 0,
+            product_id = SkuIdDict.TryGetValue(kv["product_sku"].ToString()!, out var id) ? id : 0,
             shipping_class = kv["shipping_class"]
         });
 
