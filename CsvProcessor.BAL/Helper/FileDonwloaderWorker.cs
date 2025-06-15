@@ -27,8 +27,8 @@ public class FileDonwloaderWorker : BackgroundService
                         int width = size.Item2;
                         string suffix = size.Item1;
 
-                        var ratio = width / image.Width;
-                        int height = image.Height * ratio;
+                        double ratio = (double)width / image.Width;
+                        int height = (  int)(image.Height * ratio);
 
                         image.Mutate(x => x.Resize(new ResizeOptions
                         {

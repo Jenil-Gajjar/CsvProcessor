@@ -18,7 +18,7 @@ public class ProductImageRepository : IProductImageRepository
 
     public async Task BulkInsertImagesAsync(ConcurrentBag<ProductImageDto>? set)
     {
-        if (set == null || !set.Any()) throw new Exception("No Images");
+        if (set == null || set.IsEmpty) return;
 
         using var conn = new NpgsqlConnection(_conn);
         var jsonData = JsonSerializer.Serialize(set);

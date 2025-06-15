@@ -50,7 +50,6 @@ public class CsvProcessorService : ICsvProcessorService
             });
             csv.Read();
             csv.ReadHeader();
-            int i = 1;
             int RowCount = 0;
             int InsertedRecords = 0;
             int UpdatedRecords = 0;
@@ -69,35 +68,34 @@ public class CsvProcessorService : ICsvProcessorService
                 try
                 {
                     var dimensions = dict["dimensions_cm"].ToString();
-                    if (!IsValidDimention(dimensions)) throw new Exception($"Row {i++} {dict["product_sku"]}:Invalid dimensions. Use the format LxWxH");
+                    if (!IsValidDimention(dimensions)) throw new Exception($"Row {RowCount} {dict["product_sku"]}:Invalid dimensions. Use the format LxWxH");
 
                     var hasImage = dict.Keys.Any(k => k.StartsWith("image_url") && !string.IsNullOrWhiteSpace(dict[k]?.ToString()));
-                    if (!hasImage) throw new Exception($"Row {i++} {dict["product_sku"]}:At least one image is required");
+                    if (!hasImage) throw new Exception($"Row {RowCount} {dict["product_sku"]}:At least one image is required");
 
                     if (decimal.TryParse(dict["base_price"].ToString(), out var basePrice))
                     {
                         if (basePrice <= 0)
                         {
-                            throw new Exception($"Row {i++} {dict["product_sku"]}:Base Price is not postitive");
+                            throw new Exception($"Row {RowCount} {dict["product_sku"]}:Base Price is not postitive");
                         }
                     }
                     else
                     {
-                        throw new Exception($"Row {i++} {dict["product_sku"]}:Base Price is not In Correct Format");
+                        throw new Exception($"Row {RowCount} {dict["product_sku"]}:Base Price is not In Correct Format");
                     }
                     if (decimal.TryParse(dict["weight_kg"].ToString(), out var weightKg))
                     {
                         if (weightKg <= 0)
                         {
-                            throw new Exception($"Row {i++} {dict["product_sku"]}:Weight is not postitive");
+                            throw new Exception($"Row {RowCount} {dict["product_sku"]}:Weight is not postitive");
                         }
                     }
                     else
                     {
-                        throw new Exception($"Row {i++} {dict["product_sku"]}:Weight is not In Correct Format");
+                        throw new Exception($"Row {RowCount} {dict["product_sku"]}:Weight is not In Correct Format");
                     }
-                    records.Add(dict);
-                    i++;
+                    records.Add(dict);  
 
                 }
                 catch (Exception e)

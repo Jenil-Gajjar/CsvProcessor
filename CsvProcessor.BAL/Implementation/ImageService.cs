@@ -56,7 +56,7 @@ public class ImageService : IImageService
                 tasks.AddRange(urls);
         });
 
-        var taskList = tasks.Select(item => Task.Run(async () =>
+        var taskList = tasks.Select(async (item) =>
         {
             string hash = GenerateHash(item.url);
             string imageFileName = $"{hash[..16]}.jpg";
@@ -77,7 +77,8 @@ public class ImageService : IImageService
                 {
                     try
                     {
-                        var response = await _httpClient.GetAsync(item.url);
+                        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                        var response = await _httpClient.GetAsync(item.url, cts.Token);
                         if (response.IsSuccessStatusCode)
                         {
                             byte[] ImageBytes = await response.Content.ReadAsByteArrayAsync();
@@ -138,7 +139,7 @@ public class ImageService : IImageService
                     });
                 }
             }
-        }));
+        });
 
 
         await Task.WhenAll(taskList);
