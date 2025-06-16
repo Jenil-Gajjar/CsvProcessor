@@ -1,4 +1,5 @@
 namespace CsvProcessor.BAL.Helper;
+
 using Microsoft.Extensions.Hosting;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Processing;
@@ -28,7 +29,7 @@ public class FileDonwloaderWorker : BackgroundService
                         string suffix = size.Item1;
 
                         double ratio = (double)width / image.Width;
-                        int height = (  int)(image.Height * ratio);
+                        int height = (int)(image.Height * ratio);
 
                         image.Mutate(x => x.Resize(new ResizeOptions
                         {
@@ -43,7 +44,6 @@ public class FileDonwloaderWorker : BackgroundService
                 }
                 catch (Exception e)
                 {
-
                     Console.WriteLine(e.Message);
                 }
 

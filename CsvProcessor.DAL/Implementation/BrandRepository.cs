@@ -9,10 +9,10 @@ namespace CsvProcessor.DAL.Implementation;
 public class BrandRepository : IBrandRepository
 {
     private readonly string _conn;
+
     public BrandRepository(IConfiguration configuration)
     {
         _conn = configuration.GetConnectionString("MyConnectionString")!;
-
     }
 
     public async Task BulkInsertBrandAsync(IEnumerable<IDictionary<string, object>> records, IDictionary<string, int> SkuIdDict)

@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.Globalization;
+using System.Text.RegularExpressions;
 using CsvHelper;
 using CsvHelper.Configuration;
 using CsvProcessor.BAL.Interface;
@@ -18,11 +18,18 @@ public class CsvProcessorService : ICsvProcessorService
     private readonly IShippingRepository _shippingRepository;
     private readonly IInventoryRepository _inventoryRepository;
     private readonly IImageService _imageService;
-
     private readonly IProductImageRepository _productImageRepository;
 
-
-    public CsvProcessorService(IProductRepository productRepository, ICategoryRepository categoryRepository, IBrandRepository brandRepository, IVariantRepository variantRepository, IShippingRepository shippingRepository, IInventoryRepository inventoryRepository, IProductImageRepository productImageRepository, IImageService imageService)
+    public CsvProcessorService(
+        IProductRepository productRepository,
+        ICategoryRepository categoryRepository,
+        IBrandRepository brandRepository,
+        IVariantRepository variantRepository,
+        IShippingRepository shippingRepository,
+        IInventoryRepository inventoryRepository,
+        IProductImageRepository productImageRepository,
+        IImageService imageService
+    )
     {
         _productRepository = productRepository;
         _categoryRepository = categoryRepository;
@@ -53,7 +60,7 @@ public class CsvProcessorService : ICsvProcessorService
             int RowCount = 0;
             int InsertedRecords = 0;
             int UpdatedRecords = 0;
-            List<Dictionary<string, object>> records = new();
+            List<Dictionary<string, object>> batch = new(1000);
             while (csv.Read())
             {
                 RowCount++;
@@ -67,112 +74,36 @@ public class CsvProcessorService : ICsvProcessorService
                 }
                 try
                 {
-                    var dimensions = dict["dimensions_cm"].ToString();
-                    if (!IsValidDimention(dimensions)) throw new Exception($"Row {RowCount} {dict["product_sku"]}:Invalid dimensions. Use the format LxWxH");
+                    ValidateDictionary(dict, RowCount);
+                    batch.Add(dict);
+                    if (batch.Count >= 1000)
+                    {
+                        (Dictionary<string, int> recordCounts, List<string> MessageList) = await ProcessBatchAsync(batch);
+                        InsertedRecords += recordCounts["InsertedRecords"];
+                        UpdatedRecords += recordCounts["UpdatedRecords"];
 
-                    var hasImage = dict.Keys.Any(k => k.StartsWith("image_url") && !string.IsNullOrWhiteSpace(dict[k]?.ToString()));
-                    if (!hasImage) throw new Exception($"Row {RowCount} {dict["product_sku"]}:At least one image is required");
-
-                    if (decimal.TryParse(dict["base_price"].ToString(), out var basePrice))
-                    {
-                        if (basePrice <= 0)
-                        {
-                            throw new Exception($"Row {RowCount} {dict["product_sku"]}:Base Price is not postitive");
-                        }
+                        summary.Errors.AddRange(MessageList);
+                        batch.Clear();
                     }
-                    else
-                    {
-                        throw new Exception($"Row {RowCount} {dict["product_sku"]}:Base Price is not In Correct Format");
-                    }
-                    if (decimal.TryParse(dict["weight_kg"].ToString(), out var weightKg))
-                    {
-                        if (weightKg <= 0)
-                        {
-                            throw new Exception($"Row {RowCount} {dict["product_sku"]}:Weight is not postitive");
-                        }
-                    }
-                    else
-                    {
-                        throw new Exception($"Row {RowCount} {dict["product_sku"]}:Weight is not In Correct Format");
-                    }
-                    records.Add(dict);  
-
                 }
                 catch (Exception e)
                 {
                     summary.Errors.Add(e.Message);
                 }
             }
-
-            foreach (var batch in records.Chunk(1000))
+            if (batch.Any())
             {
-                (Dictionary<string, int> SkuIdDict, Dictionary<string, int> rec) = await _productRepository.BulkUpsertProductAsync(batch);
-
-                InsertedRecords += rec["InsertedRecords"];
-                UpdatedRecords += rec["UpdatedRecords"];
-
-                try
-                {
-                    await _categoryRepository.BulkInsertCategoryAsync(batch, SkuIdDict).ConfigureAwait(false);
-                }
-                catch (Exception e)
-                {
-                    Console.WriteLine($"Category {e.Message}");
-                }
-                try
-                {
-
-                    await _brandRepository.BulkInsertBrandAsync(batch, SkuIdDict).ConfigureAwait(false);
-                }
-                catch (Exception e)
-                {
-                    Console.WriteLine($"Brand {e.Message}");
-                }
-
-                try
-                {
-                    await _shippingRepository.BulkInsertShippingClassAsync(batch, SkuIdDict).ConfigureAwait(false);
-
-                }
-                catch (Exception e)
-                {
-                    Console.WriteLine($"Shipping Class {e.Message}");
-                }
-                try
-                {
-                    await _variantRepository.BulkInsertVariantAsync(batch, SkuIdDict).ConfigureAwait(false);
-
-                }
-                catch (Exception e)
-                {
-                    Console.WriteLine($"Variant {e.Message}");
-                }
-                try
-                {
-
-                    await _inventoryRepository.BulkInsertInventoryAsync(batch, SkuIdDict).ConfigureAwait(false);
-                }
-                catch (Exception e)
-                {
-                    Console.WriteLine($"Inventory: {e.Message}");
-                }
-                try
-                {
-                    (ConcurrentBag<ProductImageDto> set, ConcurrentDictionary<string, ConcurrentBag<string>> ImageMessageList) = await _imageService.ProcessImagesAsync(batch, SkuIdDict);
-                    await _productImageRepository.BulkInsertImagesAsync(set);
-                    ImageMessageList.Values.ToList().ForEach(summary.Errors.AddRange);
-                }
-                catch (Exception e)
-                {
-                    Console.WriteLine($"Image Service: {e.Message}");
-                }
-
+                (Dictionary<string, int> recordCounts, List<string> MessageList) = await ProcessBatchAsync(batch);
+                InsertedRecords += recordCounts["InsertedRecords"];
+                UpdatedRecords += recordCounts["UpdatedRecords"];
+                summary.Errors.AddRange(MessageList);
+                batch.Clear();
             }
 
             summary.RowCount = RowCount;
             summary.InsertedRecords = InsertedRecords;
             summary.UpdatedRecords = UpdatedRecords;
-            
+
         }
         catch (Exception e)
         {
@@ -182,16 +113,109 @@ public class CsvProcessorService : ICsvProcessorService
         return summary;
     }
 
+    private async Task<(Dictionary<string, int> recordCounts, List<string>)> ProcessBatchAsync(IEnumerable<Dictionary<string, object>> batch)
+    {
+
+        List<string> MessageList = new();
+
+        (Dictionary<string, int> SkuIdDict, Dictionary<string, int> recordCounts) = await _productRepository.BulkUpsertProductAsync(batch);
+
+        try
+        {
+            await _categoryRepository.BulkInsertCategoryAsync(batch, SkuIdDict).ConfigureAwait(false);
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine($"Category:{e.Message}");
+        }
+        try
+        {
+
+            await _brandRepository.BulkInsertBrandAsync(batch, SkuIdDict).ConfigureAwait(false);
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine($"Brand:{e.Message}");
+        }
+        try
+        {
+            await _shippingRepository.BulkInsertShippingClassAsync(batch, SkuIdDict).ConfigureAwait(false);
+
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine($"Shipping Class:{e.Message}");
+        }
+        try
+        {
+            await _variantRepository.BulkInsertVariantAsync(batch, SkuIdDict).ConfigureAwait(false);
+
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine($"Variant:{e.Message}");
+        }
+        try
+        {
+
+            await _inventoryRepository.BulkInsertInventoryAsync(batch, SkuIdDict).ConfigureAwait(false);
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine($"Inventory:{e.Message}");
+        }
+        try
+        {
+            (ConcurrentBag<ProductImageDto> set, ConcurrentDictionary<string, HashSet<string>> ImageMessageList) = await _imageService.ProcessImagesAsync(batch, SkuIdDict);
+
+            ImageMessageList.Values.ToList().ForEach(MessageList.AddRange);
+            await _productImageRepository.BulkInsertImagesAsync(set);
+
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine($"Image Service:{e.Message}");
+        }
+
+        return (recordCounts, MessageList);
+
+    }
+
     private static bool IsValidDimention(string? value)
     {
-        var dimensions = value?.Split("x");
-        if (dimensions == null || dimensions.Length != 3) return false;
+        if (string.IsNullOrEmpty(value) || string.IsNullOrWhiteSpace(value)) return false;
+        string pattern = @"^\d+(\.\d+)?x\d+(\.\d+)?x\d+(\.\d+)?$";
+        return Regex.IsMatch(value!, pattern);
+    }
+    private static void ValidateDictionary(IDictionary<string, object> dict, int RowCount)
+    {
+        if (!IsValidDimention(dict["dimensions_cm"].ToString())) throw new Exception($"Row {RowCount} {dict["product_sku"]}:Invalid dimensions. Use the format LxWxH");
 
-        foreach (var dimension in dimensions)
+        var hasImage = dict.Keys.Any(k => k.StartsWith("image_url") && !string.IsNullOrWhiteSpace(dict[k]?.ToString()));
+        if (!hasImage) throw new Exception($"Row {RowCount} {dict["product_sku"]}:At least one image is required");
+
+        if (decimal.TryParse(dict["base_price"].ToString(), out var basePrice))
         {
-            if (!decimal.TryParse(dimension, out var a)) return false;
+            if (basePrice <= 0)
+            {
+                throw new Exception($"Row {RowCount} {dict["product_sku"]}:Base Price is not postitive");
+            }
         }
-        return true;
+        else
+        {
+            throw new Exception($"Row {RowCount} {dict["product_sku"]}:Base Price is not In Correct Format");
+        }
+        if (decimal.TryParse(dict["weight_kg"].ToString(), out var weightKg))
+        {
+            if (weightKg <= 0)
+            {
+                throw new Exception($"Row {RowCount} {dict["product_sku"]}:Weight is not postitive");
+            }
+        }
+        else
+        {
+            throw new Exception($"Row {RowCount} {dict["product_sku"]}:Weight is not In Correct Format");
+        }
     }
 
 }
