@@ -15,7 +15,8 @@ public class FileDonwloaderWorker : BackgroundService
             while (ImageProcessingQueue.ImageQueue.TryDequeue(out var imageProcessDto))
             {
                 string filePath = imageProcessDto.ImagePath;
-                byte[]? imageBytes = imageProcessDto.ImageBytes;
+                if (imageProcessDto.ResponseContent == null) continue;
+                byte[] imageBytes = await imageProcessDto.ResponseContent.ReadAsByteArrayAsync(stoppingToken);
                 if (imageBytes == null) continue;
                 try
                 {
@@ -24,7 +25,6 @@ public class FileDonwloaderWorker : BackgroundService
                     using var image = Image.Load(filePath);
                     foreach (var size in new[] { ("thumb", 150), ("medium", 600) })
                     {
-
                         int width = size.Item2;
                         string suffix = size.Item1;
 
@@ -46,10 +46,8 @@ public class FileDonwloaderWorker : BackgroundService
                 {
                     Console.WriteLine(e.Message);
                 }
-
             }
             await Task.Delay(1000, stoppingToken);
         }
-
     }
 }

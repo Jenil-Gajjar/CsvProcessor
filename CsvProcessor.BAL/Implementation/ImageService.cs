@@ -11,15 +11,13 @@ namespace CsvProcessor.BAL.Implementation;
 public class ImageService : IImageService
 {
     private readonly static string _imageDir = Path.Combine("wwwroot", "images");
-
-    private readonly IMemoryCache _faildUrlcache;
+    private readonly IMemoryCache _cache;
     private readonly HttpClient _httpClient;
     public ImageService(HttpClient httpClient, IMemoryCache cache)
     {
         _httpClient = httpClient;
-        _faildUrlcache = cache;
+        _cache = cache;
     }
-
 
     private static string GenerateHash(string input)
     {
@@ -54,22 +52,39 @@ public class ImageService : IImageService
             string imageFileName = $"{hash[..16]}.jpg";
             string fullPath = Path.Combine(_imageDir, imageFileName);
 
-            if (_faildUrlcache.TryGetValue(item.url, out var message))
+            if (!SkuIdDict.TryGetValue(item.sku, out var id)) return;
+
+            if (_cache.TryGetValue(item.url, out var res))
             {
-                ImageMessageList.AddOrUpdate(
-                                        item.sku,
-                                        // Add: Create a new list if the key doesn't exist
-                                        _ => new HashSet<string>() { message?.ToString()! },
-                                        // Update: Add the new value to the existing list
-                                        (_, list) =>
-                                            {
-                                                lock (list)
+                bool isCorrectUrl = Convert.ToBoolean(res);
+                if (isCorrectUrl)
+                {
+                    imageList.Add(new ProductImageDto
+                    {
+
+                        product_id = id,
+                        image_path = imageFileName,
+                        is_primary = item.is_primary
+                    });
+                }
+                else
+                {
+                    string urlMessage = $"{item.sku}:Failed Downloading Image from Url {item.url}";
+                    ImageMessageList.AddOrUpdate(
+                                            item.sku,
+                                            // Add: Create a new list if the key doesn't exist
+                                            _ => new HashSet<string>() { urlMessage },
+                                            // Update: Add the new value to the existing list
+                                            (_, list) =>
                                                 {
-                                                    list.Add(message?.ToString()!);
-                                                    return list;
+                                                    lock (list)
+                                                    {
+                                                        list.Add(urlMessage);
+                                                        return list;
+                                                    }
                                                 }
-                                            }
-                                    );
+                                        );
+                }
             }
             else
             {
@@ -78,19 +93,15 @@ public class ImageService : IImageService
                 {
                     try
                     {
-                        if (!SkuIdDict.TryGetValue(item.sku, out var id)) return;
-                        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-
+                        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
                         var req = new HttpRequestMessage(HttpMethod.Head, item.url);
 
                         var response = await _httpClient.GetAsync(item.url, cts.Token);
                         if (response.IsSuccessStatusCode)
                         {
-
-                            byte[] ImageBytes = await response.Content.ReadAsByteArrayAsync();
+                            _cache.Set(item.url, true, TimeSpan.FromHours(1));
                             imageList.Add(new ProductImageDto
                             {
-
                                 product_id = id,
                                 image_path = imageFileName,
                                 is_primary = item.is_primary
@@ -98,7 +109,7 @@ public class ImageService : IImageService
                             ImageProcessingQueue.ImageQueue.Enqueue(new ImageProcessDto()
                             {
                                 ImagePath = fullPath,
-                                ImageBytes = ImageBytes
+                                ResponseContent = response.Content
                             });
                         }
                         else
@@ -109,7 +120,7 @@ public class ImageService : IImageService
                     catch
                     {
                         string urlMessage = $"{item.sku}:Failed Downloading Image from Url {item.url}";
-                        _faildUrlcache.Set(item.url, urlMessage, TimeSpan.FromHours(1));
+                        _cache.Set(item.url, false, TimeSpan.FromHours(1));
                         ImageMessageList.AddOrUpdate(
                                         item.sku,
                                         // Add: Create a new list if the key doesn't exist
@@ -128,9 +139,10 @@ public class ImageService : IImageService
                 }
                 else
                 {
+                    _cache.Set(item.url, true, TimeSpan.FromHours(1));
                     imageList.Add(new ProductImageDto
                     {
-                        product_id = SkuIdDict.TryGetValue(item.sku, out var id) ? id : 0,
+                        product_id = id,
                         image_path = imageFileName,
                         is_primary = item.is_primary
                     });

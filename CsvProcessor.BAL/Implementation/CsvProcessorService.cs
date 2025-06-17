@@ -60,7 +60,8 @@ public class CsvProcessorService : ICsvProcessorService
             int RowCount = 0;
             int InsertedRecords = 0;
             int UpdatedRecords = 0;
-            List<Dictionary<string, object>> batch = new(1000);
+            int batchSize = 1000;
+            List<Dictionary<string, object>> batch = new(batchSize);
             while (csv.Read())
             {
                 RowCount++;
@@ -76,12 +77,11 @@ public class CsvProcessorService : ICsvProcessorService
                 {
                     ValidateDictionary(dict, RowCount);
                     batch.Add(dict);
-                    if (batch.Count >= 1000)
+                    if (batch.Count >= batchSize)
                     {
                         (Dictionary<string, int> recordCounts, List<string> MessageList) = await ProcessBatchAsync(batch);
                         InsertedRecords += recordCounts["InsertedRecords"];
                         UpdatedRecords += recordCounts["UpdatedRecords"];
-
                         summary.Errors.AddRange(MessageList);
                         batch.Clear();
                     }
