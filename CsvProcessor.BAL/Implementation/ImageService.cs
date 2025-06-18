@@ -28,9 +28,18 @@ public class ImageService : IImageService
         return hashString.ToString();
     }
 
-    public async Task<(ConcurrentBag<ProductImageDto>, ConcurrentDictionary<string, HashSet<string>>)> ProcessImagesAsync(IEnumerable<IDictionary<string, object>> records,
-    IDictionary<string, int> SkuIdDict)
+    public async Task<(
+        ConcurrentBag<ProductImageDto>,
+        ConcurrentDictionary<string, HashSet<string>>,
+        int
+        )>
+        ProcessImagesAsync(
+            IEnumerable<IDictionary<string, object>> records,
+            IDictionary<string, int> SkuIdDict
+        )
     {
+        int TotalSuccessfullUrls = 0;
+
         var tasks = new List<(string sku, string url, bool is_primary)>();
         var imageList = new ConcurrentBag<ProductImageDto>();
         var ImageMessageList = new ConcurrentDictionary<string, HashSet<string>>();
@@ -59,6 +68,7 @@ public class ImageService : IImageService
                 bool isCorrectUrl = Convert.ToBoolean(res);
                 if (isCorrectUrl)
                 {
+                    Interlocked.Increment(ref TotalSuccessfullUrls);
                     imageList.Add(new ProductImageDto
                     {
 
@@ -71,19 +81,19 @@ public class ImageService : IImageService
                 {
                     string urlMessage = $"{item.sku}:Failed Downloading Image from Url {item.url}";
                     ImageMessageList.AddOrUpdate(
-                                            item.sku,
-                                            // Add: Create a new list if the key doesn't exist
-                                            _ => new HashSet<string>() { urlMessage },
-                                            // Update: Add the new value to the existing list
-                                            (_, list) =>
+                        item.sku,
+                        // Add: Create a new list if the key doesn't exist
+                        _ => new HashSet<string>() { urlMessage },
+                                        // Update: Add the new value to the existing list
+                                        (_, list) =>
+                                            {
+                                                lock (list)
                                                 {
-                                                    lock (list)
-                                                    {
-                                                        list.Add(urlMessage);
-                                                        return list;
-                                                    }
+                                                    list.Add(urlMessage);
+                                                    return list;
                                                 }
-                                        );
+                                            }
+                                    );
                 }
             }
             else
@@ -93,12 +103,13 @@ public class ImageService : IImageService
                 {
                     try
                     {
-                        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
                         var req = new HttpRequestMessage(HttpMethod.Head, item.url);
-
                         var response = await _httpClient.GetAsync(item.url, cts.Token);
                         if (response.IsSuccessStatusCode)
                         {
+                            Interlocked.Increment(ref TotalSuccessfullUrls);
+
                             _cache.Set(item.url, true, TimeSpan.FromHours(1));
                             imageList.Add(new ProductImageDto
                             {
@@ -139,6 +150,7 @@ public class ImageService : IImageService
                 }
                 else
                 {
+                    Interlocked.Increment(ref TotalSuccessfullUrls);
                     _cache.Set(item.url, true, TimeSpan.FromHours(1));
                     imageList.Add(new ProductImageDto
                     {
@@ -152,7 +164,7 @@ public class ImageService : IImageService
 
 
         await Task.WhenAll(taskList);
-        return (imageList, ImageMessageList);
+        return (imageList, ImageMessageList, TotalSuccessfullUrls);
     }
 
 }

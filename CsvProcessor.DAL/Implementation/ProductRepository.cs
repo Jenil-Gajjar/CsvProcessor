@@ -16,7 +16,28 @@ public class ProductRepository : IProductRepository
 
     public async Task<(Dictionary<string, int>, Dictionary<string, int>)> BulkUpsertProductAsync(IEnumerable<Dictionary<string, object>> records)
     {
-        string jsonData = JsonSerializer.Serialize(records);
+        var dataList = new List<object>();
+
+        records.ToList().ForEach(record =>
+        {
+            if (string.IsNullOrWhiteSpace(record["status"].ToString()))
+            {
+                record["status"] = "Active";
+            }
+            dataList.Add(new
+            {
+                product_sku = record["product_sku"],
+                product_name = record["product_name"],
+                description = record["description"],
+                base_price = record["base_price"],
+                supplier_sku = record["supplier_sku"],
+                weight_kg = record["weight_kg"],
+                dimensions_cm = record["dimensions_cm"],
+                status = record["status"],
+            });
+        });
+
+        string jsonData = JsonSerializer.Serialize(dataList);
         try
         {
             using var conn = new NpgsqlConnection(_conn);

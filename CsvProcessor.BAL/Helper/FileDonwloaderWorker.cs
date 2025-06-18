@@ -22,6 +22,7 @@ public class FileDonwloaderWorker : BackgroundService
                 {
                     await File.WriteAllBytesAsync(imageProcessDto.ImagePath, imageBytes, stoppingToken);
 
+
                     using var image = Image.Load(filePath);
                     foreach (var size in new[] { ("thumb", 150), ("medium", 600) })
                     {
@@ -40,6 +41,7 @@ public class FileDonwloaderWorker : BackgroundService
                         string fileName = Path.GetFileNameWithoutExtension(filePath);
                         string output = Path.Combine(_imageDir, $"{fileName}_{suffix}.{ext}");
                         image.Save(output);
+
                     }
                 }
                 catch (Exception e)

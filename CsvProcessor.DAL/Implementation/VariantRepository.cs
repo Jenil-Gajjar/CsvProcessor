@@ -50,7 +50,7 @@ public class VariantRepository : IVariantRepository
 
         var jsonData = JsonSerializer.Serialize(dataList);
 
-        await conn.ExecuteAsync("select fn_inventory_bulk_upsert(@data::jsonb)", new { data = jsonData });
+        await conn.ExecuteAsync("select fn_variant_bulk_upsert(@data::jsonb)", new { data = jsonData });
 
     }
 }

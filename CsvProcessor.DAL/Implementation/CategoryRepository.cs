@@ -19,14 +19,20 @@ public class CategoryRepository : ICategoryRepository
     {
 
         using var conn = new NpgsqlConnection(_conn);
+        var dataList = new List<object>();
 
-        var rawData = records.Where(kv => !string.IsNullOrEmpty(kv["category_path"].ToString())).Select(kv => new
+        foreach (var record in records.Where(kv => !string.IsNullOrEmpty(kv["category_path"].ToString())))
         {
-            product_id = SkuIdDict.TryGetValue(kv["product_sku"].ToString()!, out var id) ? id : 0,
-            category_path = kv["category_path"]
-        });
+            if (!SkuIdDict.TryGetValue(record["product_sku"].ToString()!, out var id)) continue;
+            dataList.Add(new
+            {
+                product_id = id,
+                category_path = record["category_path"]
+            });
+        }
+        
 
-        var jsonData = JsonSerializer.Serialize(rawData);
+        var jsonData = JsonSerializer.Serialize(dataList);
 
         await conn.ExecuteAsync("select fn_category_bulk_insert(@data::jsonb)", new { data = jsonData });
     }

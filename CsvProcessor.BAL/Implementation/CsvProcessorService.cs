@@ -7,11 +7,14 @@ using CsvProcessor.BAL.Interface;
 using CsvProcessor.DAL.Interface;
 using CsvProcessor.Models.DTOs;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 namespace CsvProcessor.BAL.Implementation;
 
 public class CsvProcessorService : ICsvProcessorService
 {
     private readonly IProductRepository _productRepository;
+
+    private readonly ILogger<CsvProcessorService> _logger;
     private readonly ICategoryRepository _categoryRepository;
     private readonly IBrandRepository _brandRepository;
     private readonly IVariantRepository _variantRepository;
@@ -21,6 +24,7 @@ public class CsvProcessorService : ICsvProcessorService
     private readonly IProductImageRepository _productImageRepository;
 
     public CsvProcessorService(
+        ILogger<CsvProcessorService> logger,
         IProductRepository productRepository,
         ICategoryRepository categoryRepository,
         IBrandRepository brandRepository,
@@ -31,6 +35,7 @@ public class CsvProcessorService : ICsvProcessorService
         IImageService imageService
     )
     {
+        _logger = logger;
         _productRepository = productRepository;
         _categoryRepository = categoryRepository;
         _brandRepository = brandRepository;
@@ -58,8 +63,7 @@ public class CsvProcessorService : ICsvProcessorService
             csv.Read();
             csv.ReadHeader();
             int RowCount = 0;
-            int InsertedRecords = 0;
-            int UpdatedRecords = 0;
+
             int batchSize = 1000;
             List<Dictionary<string, object>> batch = new(batchSize);
             while (csv.Read())
@@ -79,10 +83,18 @@ public class CsvProcessorService : ICsvProcessorService
                     batch.Add(dict);
                     if (batch.Count >= batchSize)
                     {
-                        (Dictionary<string, int> recordCounts, List<string> MessageList) = await ProcessBatchAsync(batch);
-                        InsertedRecords += recordCounts["InsertedRecords"];
-                        UpdatedRecords += recordCounts["UpdatedRecords"];
-                        summary.Errors.AddRange(MessageList);
+                        (
+                            Dictionary<string, int> recordCounts,
+                            List<string> ErrorMessageList,
+                            List<string> WarningMessageList,
+                            int TotalSuccessfullUrls
+                        ) = await ProcessBatchAsync(batch);
+
+                        summary.InsertedRecords += recordCounts["InsertedRecords"];
+                        summary.UpdatedRecords += recordCounts["UpdatedRecords"];
+                        summary.TotalSuccessfullUrls += TotalSuccessfullUrls;
+                        summary.Errors.AddRange(ErrorMessageList);
+                        summary.Warnings.AddRange(WarningMessageList);
                         batch.Clear();
                     }
                 }
@@ -93,31 +105,39 @@ public class CsvProcessorService : ICsvProcessorService
             }
             if (batch.Any())
             {
-                (Dictionary<string, int> recordCounts, List<string> MessageList) = await ProcessBatchAsync(batch);
-                InsertedRecords += recordCounts["InsertedRecords"];
-                UpdatedRecords += recordCounts["UpdatedRecords"];
-                summary.Errors.AddRange(MessageList);
+                (
+                    Dictionary<string, int> recordCounts,
+                    List<string> ErrorMessageList,
+                    List<string> WarningMessageList,
+                    int TotalSuccessfullUrls
+                ) = await ProcessBatchAsync(batch);
+                summary.InsertedRecords += recordCounts["InsertedRecords"];
+                summary.UpdatedRecords += recordCounts["UpdatedRecords"];
+                summary.TotalSuccessfullUrls += TotalSuccessfullUrls;
+                summary.Errors.AddRange(ErrorMessageList);
+                summary.Warnings.AddRange(WarningMessageList);
                 batch.Clear();
             }
 
             summary.RowCount = RowCount;
-            summary.InsertedRecords = InsertedRecords;
-            summary.UpdatedRecords = UpdatedRecords;
 
         }
         catch (Exception e)
         {
+            _logger.LogError("{message}", e.Message);
             summary.Errors.Add(e.Message);
         }
 
         return summary;
     }
 
-    private async Task<(Dictionary<string, int> recordCounts, List<string>)> ProcessBatchAsync(IEnumerable<Dictionary<string, object>> batch)
+    private async Task<(Dictionary<string, int>, List<string>, List<string>, int)>
+    ProcessBatchAsync(IEnumerable<Dictionary<string, object>> batch)
     {
 
-        List<string> MessageList = new();
-
+        List<string> ErrorMessageList = new();
+        List<string> WarningMessageList = new();
+        int TotalSuccessfullUrls = 0;
         (Dictionary<string, int> SkuIdDict, Dictionary<string, int> recordCounts) = await _productRepository.BulkUpsertProductAsync(batch);
 
         try
@@ -126,7 +146,7 @@ public class CsvProcessorService : ICsvProcessorService
         }
         catch (Exception e)
         {
-            Console.WriteLine($"Category:{e.Message}");
+            _logger.LogError("Category:{Message}", e.Message);
         }
         try
         {
@@ -135,16 +155,17 @@ public class CsvProcessorService : ICsvProcessorService
         }
         catch (Exception e)
         {
-            Console.WriteLine($"Brand:{e.Message}");
+            _logger.LogError("Brand:{Message}", e.Message);
+
         }
         try
         {
-            await _shippingRepository.BulkInsertShippingClassAsync(batch, SkuIdDict).ConfigureAwait(false);
-
+            var warnings = await _shippingRepository.BulkInsertShippingClassAsync(batch, SkuIdDict).ConfigureAwait(false);
+            WarningMessageList.AddRange(warnings);
         }
         catch (Exception e)
         {
-            Console.WriteLine($"Shipping Class:{e.Message}");
+            _logger.LogError("Shipping Class:{Message}", e.Message);
         }
         try
         {
@@ -153,7 +174,7 @@ public class CsvProcessorService : ICsvProcessorService
         }
         catch (Exception e)
         {
-            Console.WriteLine($"Variant:{e.Message}");
+            _logger.LogError("Variant:{Message}", e.Message);
         }
         try
         {
@@ -162,22 +183,23 @@ public class CsvProcessorService : ICsvProcessorService
         }
         catch (Exception e)
         {
-            Console.WriteLine($"Inventory:{e.Message}");
+            _logger.LogError("Inventory:{Message}", e.Message);
         }
         try
         {
-            (ConcurrentBag<ProductImageDto> set, ConcurrentDictionary<string, HashSet<string>> ImageMessageList) = await _imageService.ProcessImagesAsync(batch, SkuIdDict);
+            (ConcurrentBag<ProductImageDto> set, ConcurrentDictionary<string, HashSet<string>> ImageMessageList, int ImageDownloads) = await _imageService.ProcessImagesAsync(batch, SkuIdDict);
+            ImageMessageList.Values.ToList().ForEach(ErrorMessageList.AddRange);
+            TotalSuccessfullUrls += ImageDownloads;
 
-            ImageMessageList.Values.ToList().ForEach(MessageList.AddRange);
             await _productImageRepository.BulkInsertImagesAsync(set);
 
         }
         catch (Exception e)
         {
-            Console.WriteLine($"Image Service:{e.Message}");
+            _logger.LogError("Image Service:{Message}", e.Message);
         }
 
-        return (recordCounts, MessageList);
+        return (recordCounts, ErrorMessageList, WarningMessageList, TotalSuccessfullUrls);
 
     }
 
@@ -203,7 +225,7 @@ public class CsvProcessorService : ICsvProcessorService
         }
         else
         {
-            throw new Exception($"Row {RowCount} {dict["product_sku"]}:Base Price is not In Correct Format");
+            throw new Exception($"Row {RowCount} {dict["product_sku"]}: Invalid price format");
         }
         if (decimal.TryParse(dict["weight_kg"].ToString(), out var weightKg))
         {
@@ -214,7 +236,7 @@ public class CsvProcessorService : ICsvProcessorService
         }
         else
         {
-            throw new Exception($"Row {RowCount} {dict["product_sku"]}:Weight is not In Correct Format");
+            throw new Exception($"Row {RowCount} {dict["product_sku"]}: Invalid Weight format");
         }
     }
 

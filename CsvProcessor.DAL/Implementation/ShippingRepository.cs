@@ -13,21 +13,31 @@ public class ShippingRepository : IShippingRepository
     {
         _conn = configuration.GetConnectionString("MyConnectionString")!;
     }
- 
 
-    public async Task BulkInsertShippingClassAsync(IEnumerable<IDictionary<string, object>> records, IDictionary<string, int> SkuIdDict)
+
+    public async Task<List<string>> BulkInsertShippingClassAsync(IEnumerable<IDictionary<string, object>> records, IDictionary<string, int> SkuIdDict)
     {
         using var conn = new NpgsqlConnection(_conn);
-
-        var rawData = records.Where(kv => !string.IsNullOrEmpty(kv["shipping_class"].ToString())).Select(kv => new
+        var dataList = new List<object>();
+        List<string> warnings = new();
+        foreach (var record in records)
         {
-            product_id = SkuIdDict.TryGetValue(kv["product_sku"].ToString()!, out var id) ? id : 0,
-            shipping_class = kv["shipping_class"]
-        });
-
-        var jsonData = JsonSerializer.Serialize(rawData);
+            if (!SkuIdDict.TryGetValue(record["product_sku"].ToString()!, out var id)) continue;
+            string? shipping_class = record["shipping_class"].ToString();
+            if (string.IsNullOrWhiteSpace(shipping_class))
+            {
+                shipping_class = "Standard";
+                warnings.Add($"{record["product_sku"]}:Invalid shipping class defaulted to 'Standard'");
+            }
+            dataList.Add(new
+            {
+                product_id = id,
+                shipping_class
+            });
+        }
+        var jsonData = JsonSerializer.Serialize(dataList);
         await conn.ExecuteAsync("select fn_shipping_class_bulk_insert(@data::jsonb)", new { data = jsonData });
-
+        return warnings;
     }
 }
 
