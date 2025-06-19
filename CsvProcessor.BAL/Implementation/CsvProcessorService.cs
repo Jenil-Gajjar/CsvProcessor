@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using CsvHelper;
@@ -12,9 +11,8 @@ namespace CsvProcessor.BAL.Implementation;
 
 public class CsvProcessorService : ICsvProcessorService
 {
-    private readonly IProductRepository _productRepository;
-
     private readonly ILogger<CsvProcessorService> _logger;
+    private readonly IProductRepository _productRepository;
     private readonly ICategoryRepository _categoryRepository;
     private readonly IBrandRepository _brandRepository;
     private readonly IVariantRepository _variantRepository;
@@ -63,7 +61,6 @@ public class CsvProcessorService : ICsvProcessorService
             csv.Read();
             csv.ReadHeader();
             int RowCount = 0;
-
             int batchSize = 1000;
             List<Dictionary<string, object>> batch = new(batchSize);
             while (csv.Read())
@@ -83,18 +80,7 @@ public class CsvProcessorService : ICsvProcessorService
                     batch.Add(dict);
                     if (batch.Count >= batchSize)
                     {
-                        (
-                            Dictionary<string, int> recordCounts,
-                            List<string> ErrorMessageList,
-                            List<string> WarningMessageList,
-                            int TotalSuccessfullUrls
-                        ) = await ProcessBatchAsync(batch);
-
-                        summary.InsertedRecords += recordCounts["InsertedRecords"];
-                        summary.UpdatedRecords += recordCounts["UpdatedRecords"];
-                        summary.TotalSuccessfullUrls += TotalSuccessfullUrls;
-                        summary.Errors.AddRange(ErrorMessageList);
-                        summary.Warnings.AddRange(WarningMessageList);
+                        await ProcessBatchAsync(batch, summary);
                         batch.Clear();
                     }
                 }
@@ -105,17 +91,7 @@ public class CsvProcessorService : ICsvProcessorService
             }
             if (batch.Any())
             {
-                (
-                    Dictionary<string, int> recordCounts,
-                    List<string> ErrorMessageList,
-                    List<string> WarningMessageList,
-                    int TotalSuccessfullUrls
-                ) = await ProcessBatchAsync(batch);
-                summary.InsertedRecords += recordCounts["InsertedRecords"];
-                summary.UpdatedRecords += recordCounts["UpdatedRecords"];
-                summary.TotalSuccessfullUrls += TotalSuccessfullUrls;
-                summary.Errors.AddRange(ErrorMessageList);
-                summary.Warnings.AddRange(WarningMessageList);
+                await ProcessBatchAsync(batch, summary);
                 batch.Clear();
             }
 
@@ -131,75 +107,76 @@ public class CsvProcessorService : ICsvProcessorService
         return summary;
     }
 
-    private async Task<(Dictionary<string, int>, List<string>, List<string>, int)>
-    ProcessBatchAsync(IEnumerable<Dictionary<string, object>> batch)
+    private async Task ProcessBatchAsync(IEnumerable<Dictionary<string, object>> batch, ImportSummaryDto summary)
     {
 
-        List<string> ErrorMessageList = new();
-        List<string> WarningMessageList = new();
-        int TotalSuccessfullUrls = 0;
-        (Dictionary<string, int> SkuIdDict, Dictionary<string, int> recordCounts) = await _productRepository.BulkUpsertProductAsync(batch);
+        ProductDto productDto = await _productRepository.BulkUpsertProductAsync(batch);
+        if (productDto.SkuToIdDict == null) throw new Exception("Sku To Id Dictionary Is Null");
+
+        summary.InsertedRecords += productDto.InsertedRecords;
+        summary.UpdatedRecords += productDto.UpdatedRecords;
 
         try
         {
-            await _categoryRepository.BulkInsertCategoryAsync(batch, SkuIdDict).ConfigureAwait(false);
+            await _categoryRepository.BulkInsertCategoryAsync(batch, productDto.SkuToIdDict).ConfigureAwait(false);
         }
         catch (Exception e)
         {
             _logger.LogError("Category:{Message}", e.Message);
+            summary.Errors.Add($"Category: {e.Message}");
         }
         try
         {
-
-            await _brandRepository.BulkInsertBrandAsync(batch, SkuIdDict).ConfigureAwait(false);
+            await _brandRepository.BulkInsertBrandAsync(batch, productDto.SkuToIdDict).ConfigureAwait(false);
         }
         catch (Exception e)
         {
             _logger.LogError("Brand:{Message}", e.Message);
-
+            summary.Errors.Add($"Brand: {e.Message}");
         }
         try
         {
-            var warnings = await _shippingRepository.BulkInsertShippingClassAsync(batch, SkuIdDict).ConfigureAwait(false);
-            WarningMessageList.AddRange(warnings);
+            var warnings = await _shippingRepository.BulkInsertShippingClassAsync(batch, productDto.SkuToIdDict).ConfigureAwait(false);
+            summary.Warnings.AddRange(warnings);
         }
         catch (Exception e)
         {
             _logger.LogError("Shipping Class:{Message}", e.Message);
+            summary.Errors.Add($"Shipping Class: {e.Message}");
         }
         try
         {
-            await _variantRepository.BulkInsertVariantAsync(batch, SkuIdDict).ConfigureAwait(false);
-
+            await _variantRepository.BulkInsertVariantAsync(batch, productDto.SkuToIdDict).ConfigureAwait(false);
         }
         catch (Exception e)
         {
             _logger.LogError("Variant:{Message}", e.Message);
+            summary.Errors.Add($"Variant: {e.Message}");
         }
         try
         {
-
-            await _inventoryRepository.BulkInsertInventoryAsync(batch, SkuIdDict).ConfigureAwait(false);
+            summary.UpdatedInventoryCount += await _inventoryRepository.BulkInsertInventoryAsync(batch, productDto.SkuToIdDict).ConfigureAwait(false);
         }
         catch (Exception e)
         {
             _logger.LogError("Inventory:{Message}", e.Message);
+            summary.Errors.Add($"Inventory: {e.Message}");
         }
         try
         {
-            (ConcurrentBag<ProductImageDto> set, ConcurrentDictionary<string, HashSet<string>> ImageMessageList, int ImageDownloads) = await _imageService.ProcessImagesAsync(batch, SkuIdDict);
-            ImageMessageList.Values.ToList().ForEach(ErrorMessageList.AddRange);
-            TotalSuccessfullUrls += ImageDownloads;
+            var imageServiceDto = await _imageService.ProcessImagesAsync(batch, productDto.SkuToIdDict);
+            summary.Errors.AddRange(imageServiceDto.ErrorMessageList);
+            summary.TotalSuccessfullUrls += imageServiceDto.ProcessedUrls;
 
-            await _productImageRepository.BulkInsertImagesAsync(set);
+            await _productImageRepository.BulkInsertImagesAsync(imageServiceDto.ImageList).ConfigureAwait(false);
 
         }
         catch (Exception e)
         {
             _logger.LogError("Image Service:{Message}", e.Message);
+            summary.Errors.Add($"Error In Image Service :{e.Message}");
         }
 
-        return (recordCounts, ErrorMessageList, WarningMessageList, TotalSuccessfullUrls);
 
     }
 

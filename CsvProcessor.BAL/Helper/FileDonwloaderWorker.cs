@@ -1,12 +1,20 @@
 namespace CsvProcessor.BAL.Helper;
 
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Processing;
 
 public class FileDonwloaderWorker : BackgroundService
 {
     private readonly static string _imageDir = Path.Combine("wwwroot", "images");
+
+    private readonly ILogger<FileDonwloaderWorker> _logger;
+
+    public FileDonwloaderWorker(ILogger<FileDonwloaderWorker> logger)
+    {
+        _logger = logger;
+    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -46,7 +54,7 @@ public class FileDonwloaderWorker : BackgroundService
                 }
                 catch (Exception e)
                 {
-                    Console.WriteLine(e.Message);
+                    _logger.LogError("{Message}", e.Message);
                 }
             }
             await Task.Delay(1000, stoppingToken);

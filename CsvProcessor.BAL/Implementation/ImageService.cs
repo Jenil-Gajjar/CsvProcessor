@@ -11,6 +11,7 @@ namespace CsvProcessor.BAL.Implementation;
 public class ImageService : IImageService
 {
     private readonly static string _imageDir = Path.Combine("wwwroot", "images");
+
     private readonly IMemoryCache _cache;
     private readonly HttpClient _httpClient;
     public ImageService(HttpClient httpClient, IMemoryCache cache)
@@ -23,37 +24,30 @@ public class ImageService : IImageService
     {
         byte[] bytes = Encoding.UTF8.GetBytes(input);
         byte[] hashBytes = SHA256.HashData(bytes);
-        StringBuilder hashString = new();
-        hashBytes.ToList().ForEach(b => hashString.Append(b.ToString("x2")));
-        return hashString.ToString();
+        return Convert.ToHexString(hashBytes).ToLower();
     }
 
-    public async Task<(
-        ConcurrentBag<ProductImageDto>,
-        ConcurrentDictionary<string, HashSet<string>>,
-        int
-        )>
-        ProcessImagesAsync(
-            IEnumerable<IDictionary<string, object>> records,
-            IDictionary<string, int> SkuIdDict
-        )
+    public async Task<ImageServiceDto> ProcessImagesAsync(IEnumerable<IDictionary<string, object>> records, IDictionary<string, int> SkuIdDict)
     {
-        int TotalSuccessfullUrls = 0;
 
-        var tasks = new List<(string sku, string url, bool is_primary)>();
-        var imageList = new ConcurrentBag<ProductImageDto>();
-        var ImageMessageList = new ConcurrentDictionary<string, HashSet<string>>();
+        ImageServiceDto imageServiceDto = new();
+        var tasks = new List<(string sku, string url, bool is_primary)>(records.Count() * 2);
+        var processedUrls = new ConcurrentDictionary<string, bool>();
 
-        records.ToList().ForEach(record =>
+        foreach (var record in records)
         {
-            if (!record.TryGetValue("product_sku", out var sku)) return;
-            if (string.IsNullOrEmpty(sku.ToString()) || !SkuIdDict.ContainsKey(sku.ToString()!)) return;
-
-            var urls = record.Where(kv => kv.Key.StartsWith("image_url") && !string.IsNullOrWhiteSpace(kv.Value?.ToString())).Select((kv, ix) => (sku.ToString()!, kv.Value.ToString()!, ix == 0));
-
-            if (urls != null && urls.Any())
-                tasks.AddRange(urls);
-        });
+            if (!record.TryGetValue("product_sku", out var sku)) continue;
+            if (string.IsNullOrEmpty(sku.ToString()) || !SkuIdDict.ContainsKey(sku.ToString()!)) continue;
+            int index = 0;
+            foreach (var kv in record)
+            {
+                if (kv.Key.StartsWith("image_url") && !string.IsNullOrWhiteSpace(kv.Value?.ToString()))
+                {
+                    tasks.Add((sku.ToString(), kv.Value.ToString(), index == 0)!);
+                    index++;
+                }
+            }
+        }
 
         var taskList = tasks.Select(async (item) =>
         {
@@ -63,15 +57,13 @@ public class ImageService : IImageService
 
             if (!SkuIdDict.TryGetValue(item.sku, out var id)) return;
 
-            if (_cache.TryGetValue(item.url, out var res))
+            if (_cache.TryGetValue(item.url, out bool isCorrectUrl))
             {
-                bool isCorrectUrl = Convert.ToBoolean(res);
                 if (isCorrectUrl)
                 {
-                    Interlocked.Increment(ref TotalSuccessfullUrls);
-                    imageList.Add(new ProductImageDto
+                    processedUrls.TryAdd(item.url, true);
+                    imageServiceDto.ImageList.Add(new ProductImageDto
                     {
-
                         product_id = id,
                         image_path = imageFileName,
                         is_primary = item.is_primary
@@ -79,92 +71,69 @@ public class ImageService : IImageService
                 }
                 else
                 {
-                    string urlMessage = $"{item.sku}:Failed Downloading Image from Url {item.url}";
-                    ImageMessageList.AddOrUpdate(
-                        item.sku,
-                        // Add: Create a new list if the key doesn't exist
-                        _ => new HashSet<string>() { urlMessage },
-                                        // Update: Add the new value to the existing list
-                                        (_, list) =>
-                                            {
-                                                lock (list)
-                                                {
-                                                    list.Add(urlMessage);
-                                                    return list;
-                                                }
-                                            }
-                                    );
+                    AddErrorMessage(imageServiceDto.ErrorMessageList, item.sku, item.url);
+                }
+                return;
+            }
+
+
+            if (!File.Exists(fullPath))
+            {
+                try
+                {
+                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+                    var response = await _httpClient.GetAsync(item.url, cts.Token);
+                    if (response.IsSuccessStatusCode)
+                    {
+                        processedUrls.TryAdd(item.url, true);
+                        _cache.Set(item.url, true, TimeSpan.FromHours(1));
+                        imageServiceDto.ImageList.Add(new ProductImageDto
+                        {
+                            product_id = id,
+                            image_path = imageFileName,
+                            is_primary = item.is_primary
+                        });
+                        ImageProcessingQueue.ImageQueue.Enqueue(new ImageProcessDto()
+                        {
+                            ImagePath = fullPath,
+                            ResponseContent = response.Content
+                        });
+                    }
+                    else
+                    {
+                        _cache.Set(item.url, false, TimeSpan.FromHours(1));
+                        AddErrorMessage(imageServiceDto.ErrorMessageList, item.sku, item.url);
+                    }
+                }
+                catch
+                {
+                    _cache.Set(item.url, false, TimeSpan.FromHours(1));
+                    AddErrorMessage(imageServiceDto.ErrorMessageList, item.sku, item.url);
                 }
             }
             else
             {
-
-                if (!File.Exists(fullPath))
+                processedUrls.TryAdd(item.url, true);
+                _cache.Set(item.url, true, TimeSpan.FromHours(1));
+                imageServiceDto.ImageList.Add(new ProductImageDto
                 {
-                    try
-                    {
-                        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
-                        var req = new HttpRequestMessage(HttpMethod.Head, item.url);
-                        var response = await _httpClient.GetAsync(item.url, cts.Token);
-                        if (response.IsSuccessStatusCode)
-                        {
-                            Interlocked.Increment(ref TotalSuccessfullUrls);
-
-                            _cache.Set(item.url, true, TimeSpan.FromHours(1));
-                            imageList.Add(new ProductImageDto
-                            {
-                                product_id = id,
-                                image_path = imageFileName,
-                                is_primary = item.is_primary
-                            });
-                            ImageProcessingQueue.ImageQueue.Enqueue(new ImageProcessDto()
-                            {
-                                ImagePath = fullPath,
-                                ResponseContent = response.Content
-                            });
-                        }
-                        else
-                        {
-                            throw new Exception("Image Not Found!");
-                        }
-                    }
-                    catch
-                    {
-                        string urlMessage = $"{item.sku}:Failed Downloading Image from Url {item.url}";
-                        _cache.Set(item.url, false, TimeSpan.FromHours(1));
-                        ImageMessageList.AddOrUpdate(
-                                        item.sku,
-                                        // Add: Create a new list if the key doesn't exist
-                                        _ => new HashSet<string>() { urlMessage },
-                                        // Update: Add the new value to the existing list
-                                        (_, list) =>
-                                            {
-                                                lock (list)
-                                                {
-                                                    list.Add(urlMessage);
-                                                    return list;
-                                                }
-                                            }
-                                    );
-                    }
-                }
-                else
-                {
-                    Interlocked.Increment(ref TotalSuccessfullUrls);
-                    _cache.Set(item.url, true, TimeSpan.FromHours(1));
-                    imageList.Add(new ProductImageDto
-                    {
-                        product_id = id,
-                        image_path = imageFileName,
-                        is_primary = item.is_primary
-                    });
-                }
+                    product_id = id,
+                    image_path = imageFileName,
+                    is_primary = item.is_primary
+                });
             }
         });
 
-
         await Task.WhenAll(taskList);
-        return (imageList, ImageMessageList, TotalSuccessfullUrls);
+        imageServiceDto.ProcessedUrls = processedUrls.Count;
+        return imageServiceDto;
     }
-
+    public static void AddErrorMessage(HashSet<string> ErrorMessageList, string sku, string url)
+    {
+        string urlMessage = $"{sku}:Failed Downloading Image from Url {url}";
+        lock (ErrorMessageList)
+        {
+            ErrorMessageList.Add(urlMessage);
+        }
+    }
 }

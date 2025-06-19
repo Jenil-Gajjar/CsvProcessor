@@ -1,7 +1,9 @@
 using System.Text.Json;
 using CsvProcessor.DAL.Interface;
+using CsvProcessor.Models.DTOs;
 using Dapper;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Npgsql;
 
 namespace CsvProcessor.DAL.Implementation;
@@ -9,20 +11,25 @@ namespace CsvProcessor.DAL.Implementation;
 public class ProductRepository : IProductRepository
 {
     private readonly string _conn;
-    public ProductRepository(IConfiguration configuration)
+
+    private readonly ILogger<ProductRepository> _logger;
+
+    public ProductRepository(IConfiguration configuration, ILogger<ProductRepository> logger)
     {
         _conn = configuration.GetConnectionString("MyConnectionString")!;
+        _logger = logger;
     }
 
-    public async Task<(Dictionary<string, int>, Dictionary<string, int>)> BulkUpsertProductAsync(IEnumerable<Dictionary<string, object>> records)
+    public async Task<ProductDto> BulkUpsertProductAsync(IEnumerable<Dictionary<string, object>> records)
     {
         var dataList = new List<object>();
 
-        records.ToList().ForEach(record =>
+        foreach (var record in records)
         {
-            if (string.IsNullOrWhiteSpace(record["status"].ToString()))
+            string? status = record["status"].ToString();
+            if (string.IsNullOrWhiteSpace(status))
             {
-                record["status"] = "Active";
+                status = "Active";
             }
             dataList.Add(new
             {
@@ -33,27 +40,31 @@ public class ProductRepository : IProductRepository
                 supplier_sku = record["supplier_sku"],
                 weight_kg = record["weight_kg"],
                 dimensions_cm = record["dimensions_cm"],
-                status = record["status"],
+                status,
             });
-        });
+        }
 
         string jsonData = JsonSerializer.Serialize(dataList);
         try
         {
             using var conn = new NpgsqlConnection(_conn);
             var result = await conn.QueryAsync<(int id, string Sku, bool IsInserted)>("SELECT * from public.fn_product_bulk_upsert(@data::jsonb)", new { data = jsonData });
-            Dictionary<string, int> recordCounts = new()
+
+            ProductDto productDto = new()
             {
-                {"InsertedRecords" ,result.Count(u => u.IsInserted)},
-                {"UpdatedRecords" ,result.Count(u => !u.IsInserted)},
+                SkuToIdDict = result.ToDictionary(t => t.Sku, t => t.id),
+                InsertedRecords = result.Count(u => u.IsInserted),
+                UpdatedRecords = result.Count(u => !u.IsInserted),
             };
-            return (result.ToDictionary(t => t.Sku, t => t.id), recordCounts);
+
+            return productDto;
         }
         catch (Exception e)
         {
 
-            Console.WriteLine(e.Message);
-            Console.WriteLine("Error While Saving Data to Db");
+            _logger.LogError("{Message}", e.InnerException);
+            _logger.LogError("{Message}", e.Message);
+            _logger.LogError("Error While Saving Data to Db");
             throw;
         }
 

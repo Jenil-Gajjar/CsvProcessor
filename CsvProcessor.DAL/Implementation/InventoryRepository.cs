@@ -17,7 +17,7 @@ public class InventoryRepository : IInventoryRepository
 
     }
 
-    public async Task BulkInsertInventoryAsync(IEnumerable<IDictionary<string, object>> records,
+    public async Task<int> BulkInsertInventoryAsync(IEnumerable<IDictionary<string, object>> records,
     IDictionary<string, int> SkuIdDict)
     {
         using var conn = new NpgsqlConnection(_conn);
@@ -43,6 +43,7 @@ public class InventoryRepository : IInventoryRepository
             }
         }
         var jsonData = JsonSerializer.Serialize(dataList);
-        await conn.ExecuteAsync("select fn_warehouse_inventory_bulk_insert(@data::jsonb)", new { data = jsonData });
+        var updateCount = await conn.ExecuteScalarAsync<int>("select fn_warehouse_inventory_bulk_insert(@data::jsonb)", new { data = jsonData });
+        return updateCount;
     }
 }

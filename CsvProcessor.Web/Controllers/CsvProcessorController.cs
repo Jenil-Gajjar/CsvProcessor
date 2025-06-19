@@ -27,6 +27,7 @@ public class CsvProcessorController : Controller
         content.AppendLine($"Total Updated Records:{summary.UpdatedRecords}");
         content.AppendLine($"Total Skipped Records:{summary.RowCount - summary.InsertedRecords - summary.UpdatedRecords}");
         content.AppendLine($"Total Url Successfully Processed:{summary.TotalSuccessfullUrls}");
+        content.AppendLine($"Total Inventory Updates Performed:{summary.UpdatedInventoryCount}");
         if (summary.Warnings.Any())
         {
             content.AppendLine("\nWarnings:");

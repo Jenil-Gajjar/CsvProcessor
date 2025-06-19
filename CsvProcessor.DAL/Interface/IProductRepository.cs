@@ -1,8 +1,9 @@
+using CsvProcessor.Models.DTOs;
+
 namespace CsvProcessor.DAL.Interface;
 
 public interface IProductRepository
 {
-
-    public Task<(Dictionary<string, int>, Dictionary<string, int>)> BulkUpsertProductAsync(IEnumerable<Dictionary<string, object>> records);
+    public Task<ProductDto> BulkUpsertProductAsync(IEnumerable<Dictionary<string, object>> records);
 
 }
