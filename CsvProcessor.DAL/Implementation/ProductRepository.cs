@@ -62,9 +62,7 @@ public class ProductRepository : IProductRepository
         catch (Exception e)
         {
 
-            _logger.LogError("{Message}", e.InnerException);
             _logger.LogError("{Message}", e.Message);
-            _logger.LogError("Error While Saving Data to Db");
             throw;
         }
 

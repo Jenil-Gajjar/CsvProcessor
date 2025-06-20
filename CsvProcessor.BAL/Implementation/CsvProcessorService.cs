@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
 using CsvHelper;
 using CsvHelper.Configuration;
@@ -11,7 +13,6 @@ namespace CsvProcessor.BAL.Implementation;
 
 public class CsvProcessorService : ICsvProcessorService
 {
-    private readonly ILogger<CsvProcessorService> _logger;
     private readonly IProductRepository _productRepository;
     private readonly ICategoryRepository _categoryRepository;
     private readonly IBrandRepository _brandRepository;
@@ -22,7 +23,6 @@ public class CsvProcessorService : ICsvProcessorService
     private readonly IProductImageRepository _productImageRepository;
 
     public CsvProcessorService(
-        ILogger<CsvProcessorService> logger,
         IProductRepository productRepository,
         ICategoryRepository categoryRepository,
         IBrandRepository brandRepository,
@@ -33,7 +33,6 @@ public class CsvProcessorService : ICsvProcessorService
         IImageService imageService
     )
     {
-        _logger = logger;
         _productRepository = productRepository;
         _categoryRepository = categoryRepository;
         _brandRepository = brandRepository;
@@ -61,7 +60,7 @@ public class CsvProcessorService : ICsvProcessorService
             csv.Read();
             csv.ReadHeader();
             int RowCount = 0;
-            int batchSize = 1000;
+            int batchSize = 5000;
             List<Dictionary<string, object>> batch = new(batchSize);
             while (csv.Read())
             {
@@ -76,8 +75,9 @@ public class CsvProcessorService : ICsvProcessorService
                 }
                 try
                 {
-                    ValidateDictionary(dict, RowCount);
-                    batch.Add(dict);
+                    if (ValidateDictionary(dict, RowCount, summary))
+                        batch.Add(dict);
+
                     if (batch.Count >= batchSize)
                     {
                         await ProcessBatchAsync(batch, summary);
@@ -100,13 +100,11 @@ public class CsvProcessorService : ICsvProcessorService
         }
         catch (Exception e)
         {
-            _logger.LogError("{message}", e.Message);
             summary.Errors.Add(e.Message);
         }
 
         return summary;
     }
-
     private async Task ProcessBatchAsync(IEnumerable<Dictionary<string, object>> batch, ImportSummaryDto summary)
     {
 
@@ -118,103 +116,109 @@ public class CsvProcessorService : ICsvProcessorService
 
         try
         {
-            await _categoryRepository.BulkInsertCategoryAsync(batch, productDto.SkuToIdDict).ConfigureAwait(false);
+            await _categoryRepository.BulkInsertCategoryAsync(batch, productDto.SkuToIdDict);
         }
         catch (Exception e)
         {
-            _logger.LogError("Category:{Message}", e.Message);
             summary.Errors.Add($"Category: {e.Message}");
         }
         try
         {
-            await _brandRepository.BulkInsertBrandAsync(batch, productDto.SkuToIdDict).ConfigureAwait(false);
+            await _brandRepository.BulkInsertBrandAsync(batch, productDto.SkuToIdDict);
         }
         catch (Exception e)
         {
-            _logger.LogError("Brand:{Message}", e.Message);
             summary.Errors.Add($"Brand: {e.Message}");
         }
         try
         {
-            var warnings = await _shippingRepository.BulkInsertShippingClassAsync(batch, productDto.SkuToIdDict).ConfigureAwait(false);
+            var warnings = await _shippingRepository.BulkInsertShippingClassAsync(batch, productDto.SkuToIdDict);
             summary.Warnings.AddRange(warnings);
         }
         catch (Exception e)
         {
-            _logger.LogError("Shipping Class:{Message}", e.Message);
             summary.Errors.Add($"Shipping Class: {e.Message}");
         }
         try
         {
-            await _variantRepository.BulkInsertVariantAsync(batch, productDto.SkuToIdDict).ConfigureAwait(false);
+            await _variantRepository.BulkInsertVariantAsync(batch, productDto.SkuToIdDict);
         }
         catch (Exception e)
         {
-            _logger.LogError("Variant:{Message}", e.Message);
             summary.Errors.Add($"Variant: {e.Message}");
         }
         try
         {
-            summary.UpdatedInventoryCount += await _inventoryRepository.BulkInsertInventoryAsync(batch, productDto.SkuToIdDict).ConfigureAwait(false);
+            var UpdatedInventoryCount = await _inventoryRepository.BulkInsertInventoryAsync(batch, productDto.SkuToIdDict);
+            summary.UpdatedInventoryCount += UpdatedInventoryCount;
         }
         catch (Exception e)
         {
-            _logger.LogError("Inventory:{Message}", e.Message);
             summary.Errors.Add($"Inventory: {e.Message}");
         }
         try
         {
-            var imageServiceDto = await _imageService.ProcessImagesAsync(batch, productDto.SkuToIdDict);
+            ImageServiceDto imageServiceDto = await _imageService.ProcessImagesAsync(batch, productDto.SkuToIdDict);
             summary.Errors.AddRange(imageServiceDto.ErrorMessageList);
-            summary.TotalSuccessfullUrls += imageServiceDto.ProcessedUrls;
-
-            await _productImageRepository.BulkInsertImagesAsync(imageServiceDto.ImageList).ConfigureAwait(false);
-
+            summary.TotalSuccessfullUrls += imageServiceDto.ProcessedSuccessfullUrls;
+            await _productImageRepository.BulkInsertImagesAsync(imageServiceDto.ImageList);
         }
         catch (Exception e)
         {
-            _logger.LogError("Image Service:{Message}", e.Message);
             summary.Errors.Add($"Error In Image Service :{e.Message}");
         }
 
 
     }
-
     private static bool IsValidDimention(string? value)
     {
         if (string.IsNullOrEmpty(value) || string.IsNullOrWhiteSpace(value)) return false;
         string pattern = @"^\d+(\.\d+)?x\d+(\.\d+)?x\d+(\.\d+)?$";
         return Regex.IsMatch(value!, pattern);
     }
-    private static void ValidateDictionary(IDictionary<string, object> dict, int RowCount)
+    private static bool ValidateDictionary(IDictionary<string, object> dict, int RowCount, ImportSummaryDto summary)
     {
-        if (!IsValidDimention(dict["dimensions_cm"].ToString())) throw new Exception($"Row {RowCount} {dict["product_sku"]}:Invalid dimensions. Use the format LxWxH");
+        bool IsValid = true;
+        if (!IsValidDimention(dict["dimensions_cm"].ToString()))
+        {
+            IsValid = false;
+            summary.Warnings.Add($"Row {RowCount} {dict["product_sku"]}:Invalid dimensions. Use the format LxWxH");
+        };
 
-        var hasImage = dict.Keys.Any(k => k.StartsWith("image_url") && !string.IsNullOrWhiteSpace(dict[k]?.ToString()));
-        if (!hasImage) throw new Exception($"Row {RowCount} {dict["product_sku"]}:At least one image is required");
+        var hasValidImage = dict.Keys.Any(k => k.StartsWith("image_url") && !string.IsNullOrWhiteSpace(dict[k]?.ToString()));
+        if (!hasValidImage)
+        {
+            IsValid = false;
+            summary.Warnings.Add($"Row {RowCount} {dict["product_sku"]}:At least one image is required");
+        }
 
         if (decimal.TryParse(dict["base_price"].ToString(), out var basePrice))
         {
             if (basePrice <= 0)
             {
-                throw new Exception($"Row {RowCount} {dict["product_sku"]}:Base Price is not postitive");
+                IsValid = false;
+                summary.Warnings.Add($"Row {RowCount} {dict["product_sku"]}:Base Price is not postitive");
             }
         }
         else
         {
-            throw new Exception($"Row {RowCount} {dict["product_sku"]}: Invalid price format");
+            IsValid = false;
+            summary.Warnings.Add($"Row {RowCount} {dict["product_sku"]}: Invalid price format");
         }
         if (decimal.TryParse(dict["weight_kg"].ToString(), out var weightKg))
         {
             if (weightKg <= 0)
             {
-                throw new Exception($"Row {RowCount} {dict["product_sku"]}:Weight is not postitive");
+                IsValid = false;
+                summary.Warnings.Add($"Row {RowCount} {dict["product_sku"]}:Weight is not postitive");
             }
         }
         else
         {
-            throw new Exception($"Row {RowCount} {dict["product_sku"]}: Invalid Weight format");
+            IsValid = false;
+            summary.Warnings.Add($"Row {RowCount} {dict["product_sku"]}: Invalid Weight format");
         }
+        return IsValid;
     }
 
 }

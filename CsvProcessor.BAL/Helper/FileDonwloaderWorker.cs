@@ -14,6 +14,7 @@ public class FileDonwloaderWorker : BackgroundService
     public FileDonwloaderWorker(ILogger<FileDonwloaderWorker> logger)
     {
         _logger = logger;
+        if (!Directory.Exists(_imageDir)) Directory.CreateDirectory(_imageDir);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

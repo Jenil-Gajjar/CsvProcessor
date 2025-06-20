@@ -5,6 +5,6 @@ namespace CsvProcessor.Models.DTOs;
 public class ImageServiceDto
 {
     public ConcurrentBag<ProductImageDto> ImageList { get; set; } = new();
-    public  HashSet<string> ErrorMessageList { get; set; } = new();
-    public int ProcessedUrls { get; set; }
+    public HashSet<string> ErrorMessageList { get; set; } = new();
+    public int ProcessedSuccessfullUrls { get; set; }
 }

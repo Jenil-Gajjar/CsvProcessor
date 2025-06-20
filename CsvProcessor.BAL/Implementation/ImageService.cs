@@ -5,26 +5,21 @@ using CsvProcessor.Models.DTOs;
 using CsvProcessor.BAL.Helper;
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Caching.Memory;
+using System.Net;
 
 namespace CsvProcessor.BAL.Implementation;
 
 public class ImageService : IImageService
 {
     private readonly static string _imageDir = Path.Combine("wwwroot", "images");
-
     private readonly IMemoryCache _cache;
     private readonly HttpClient _httpClient;
     public ImageService(HttpClient httpClient, IMemoryCache cache)
     {
         _httpClient = httpClient;
         _cache = cache;
-    }
-
-    private static string GenerateHash(string input)
-    {
-        byte[] bytes = Encoding.UTF8.GetBytes(input);
-        byte[] hashBytes = SHA256.HashData(bytes);
-        return Convert.ToHexString(hashBytes).ToLower();
+        if (!Directory.Exists(_imageDir))
+            Directory.CreateDirectory(_imageDir);
     }
 
     public async Task<ImageServiceDto> ProcessImagesAsync(IEnumerable<IDictionary<string, object>> records, IDictionary<string, int> SkuIdDict)
@@ -49,91 +44,118 @@ public class ImageService : IImageService
             }
         }
 
-        var taskList = tasks.Select(async (item) =>
+        List<Task>? taskList = new();
+
+        foreach (var task in tasks)
         {
-            string hash = GenerateHash(item.url);
-            string imageFileName = $"{hash[..16]}.jpg";
-            string fullPath = Path.Combine(_imageDir, imageFileName);
+            taskList.Add(ProcessUrlAsync(task, SkuIdDict, imageServiceDto, processedUrls));
+        }
 
-            if (!SkuIdDict.TryGetValue(item.sku, out var id)) return;
+        await Task.WhenAll(taskList);
+        imageServiceDto.ProcessedSuccessfullUrls = processedUrls.Count;
+        return imageServiceDto;
+    }
 
-            if (_cache.TryGetValue(item.url, out bool isCorrectUrl))
+    private async Task ProcessUrlAsync(
+        (string sku, string url, bool is_primary) item,
+        IDictionary<string, int> SkuIdDict,
+        ImageServiceDto imageServiceDto,
+        ConcurrentDictionary<string, bool> processedUrls
+    )
+    {
+        var (sku, url, is_primary) = item;
+        string hash = GenerateHash(url);
+        string imageFileName = $"{hash[..16]}.jpg";
+        string fullPath = Path.Combine(_imageDir, imageFileName);
+
+        if (!SkuIdDict.TryGetValue(sku, out var id)) return;
+
+        if (!IsValidUrl(url))
+        {
+            _cache.Set(url, false, TimeSpan.FromHours(1));
+            LogError(imageServiceDto.ErrorMessageList, $"{sku}:Invalid url:{url}");
+            return;
+        }
+        if (_cache.TryGetValue(url, out bool isCorrectUrl))
+        {
+            if (isCorrectUrl)
             {
-                if (isCorrectUrl)
-                {
-                    processedUrls.TryAdd(item.url, true);
-                    imageServiceDto.ImageList.Add(new ProductImageDto
-                    {
-                        product_id = id,
-                        image_path = imageFileName,
-                        is_primary = item.is_primary
-                    });
-                }
-                else
-                {
-                    AddErrorMessage(imageServiceDto.ErrorMessageList, item.sku, item.url);
-                }
-                return;
-            }
-
-
-            if (!File.Exists(fullPath))
-            {
-                try
-                {
-                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
-                    var response = await _httpClient.GetAsync(item.url, cts.Token);
-                    if (response.IsSuccessStatusCode)
-                    {
-                        processedUrls.TryAdd(item.url, true);
-                        _cache.Set(item.url, true, TimeSpan.FromHours(1));
-                        imageServiceDto.ImageList.Add(new ProductImageDto
-                        {
-                            product_id = id,
-                            image_path = imageFileName,
-                            is_primary = item.is_primary
-                        });
-                        ImageProcessingQueue.ImageQueue.Enqueue(new ImageProcessDto()
-                        {
-                            ImagePath = fullPath,
-                            ResponseContent = response.Content
-                        });
-                    }
-                    else
-                    {
-                        _cache.Set(item.url, false, TimeSpan.FromHours(1));
-                        AddErrorMessage(imageServiceDto.ErrorMessageList, item.sku, item.url);
-                    }
-                }
-                catch
-                {
-                    _cache.Set(item.url, false, TimeSpan.FromHours(1));
-                    AddErrorMessage(imageServiceDto.ErrorMessageList, item.sku, item.url);
-                }
+                processedUrls[url] = true;
+                AddImage(imageServiceDto, id, imageFileName, is_primary);
             }
             else
             {
-                processedUrls.TryAdd(item.url, true);
-                _cache.Set(item.url, true, TimeSpan.FromHours(1));
-                imageServiceDto.ImageList.Add(new ProductImageDto
-                {
-                    product_id = id,
-                    image_path = imageFileName,
-                    is_primary = item.is_primary
-                });
+                LogError(imageServiceDto.ErrorMessageList, $"{sku}:Image URL {url} failed to download");
             }
-        });
+            return;
+        }
 
-        await Task.WhenAll(taskList);
-        imageServiceDto.ProcessedUrls = processedUrls.Count;
-        return imageServiceDto;
+        if (File.Exists(fullPath))
+        {
+            processedUrls[url] = true;
+            _cache.Set(url, true, TimeSpan.FromHours(1));
+            AddImage(imageServiceDto, id, imageFileName, is_primary);
+            return;
+        }
+
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+            var response = await _httpClient.GetAsync(url, cts.Token);
+            if (response.IsSuccessStatusCode)
+            {
+                processedUrls[url] = true;
+                _cache.Set(url, true, TimeSpan.FromHours(1));
+                AddImage(imageServiceDto, id, imageFileName, is_primary);
+                ImageProcessingQueue.ImageQueue.Enqueue(new ImageProcessDto()
+                {
+                    ImagePath = fullPath,
+                    ResponseContent = response.Content
+                });
+                return;
+            }
+            TimeSpan timeSpan = TimeSpan.FromSeconds(10);
+
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                timeSpan = TimeSpan.FromHours(1);
+            }
+
+            _cache.Set(url, false, timeSpan);
+            LogError(imageServiceDto.ErrorMessageList, $"{sku}:Image URL {url} failed to download");
+        }
+        catch
+        {
+            _cache.Set(url, false, TimeSpan.FromHours(1));
+            LogError(imageServiceDto.ErrorMessageList, $"{sku}:Image URL {url} failed to download");
+        }
+
     }
-    public static void AddErrorMessage(HashSet<string> ErrorMessageList, string sku, string url)
+
+    private static string GenerateHash(string input)
     {
-        string urlMessage = $"{sku}:Failed Downloading Image from Url {url}";
+        byte[] bytes = Encoding.UTF8.GetBytes(input);
+        byte[] hashBytes = SHA256.HashData(bytes);
+        return Convert.ToHexString(hashBytes).ToLower();
+    }
+    private static void LogError(HashSet<string> ErrorMessageList, string message)
+    {
         lock (ErrorMessageList)
         {
-            ErrorMessageList.Add(urlMessage);
+            ErrorMessageList.Add(message);
         }
+    }
+    private static void AddImage(ImageServiceDto imageServiceDto, int id, string imageFileName, bool is_primary)
+    {
+        imageServiceDto.ImageList.Add(new ProductImageDto
+        {
+            product_id = id,
+            image_path = imageFileName,
+            is_primary = is_primary
+        });
+    }
+    private static bool IsValidUrl(string url)
+    {
+        return Uri.TryCreate(url, UriKind.Absolute, out var uriResult) && (uriResult.Scheme == Uri.UriSchemeHttp || uriResult.Scheme == Uri.UriSchemeHttps);
     }
 }
