@@ -23,14 +23,14 @@ public class CategoryRepository : ICategoryRepository
 
         foreach (var record in records.Where(kv => !string.IsNullOrEmpty(kv["category_path"].ToString())))
         {
-            if (!SkuIdDict.TryGetValue(record["product_sku"].ToString()!, out var id)) continue;
+            if (!SkuIdDict.TryGetValue(record["product_sku"].ToString()?.ToLower()!, out var id)) continue;
             dataList.Add(new
             {
                 product_id = id,
-                category_path = record["category_path"]
+                category_path = record["category_path"].ToString()?.Trim()
             });
         }
-        
+
 
         var jsonData = JsonSerializer.Serialize(dataList);
 

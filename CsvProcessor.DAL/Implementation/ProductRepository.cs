@@ -33,14 +33,14 @@ public class ProductRepository : IProductRepository
             }
             dataList.Add(new
             {
-                product_sku = record["product_sku"],
-                product_name = record["product_name"],
-                description = record["description"],
-                base_price = record["base_price"],
-                supplier_sku = record["supplier_sku"],
-                weight_kg = record["weight_kg"],
-                dimensions_cm = record["dimensions_cm"],
-                status,
+                product_sku = record["product_sku"].ToString()?.Trim().ToLower(),
+                product_name = record["product_name"].ToString()?.Trim().ToLower(),
+                description = record["description"].ToString()?.Trim().ToLower(),
+                base_price = record["base_price"].ToString()?.Trim().ToLower(),
+                supplier_sku = record["supplier_sku"].ToString()?.Trim().ToLower(),
+                weight_kg = record["weight_kg"].ToString()?.Trim().ToLower(),
+                dimensions_cm = record["dimensions_cm"].ToString()?.Trim().ToLower(),
+                status = status.ToString().ToLower(),
             });
         }
 

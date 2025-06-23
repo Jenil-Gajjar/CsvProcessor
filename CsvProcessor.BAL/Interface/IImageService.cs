@@ -6,5 +6,5 @@ namespace CsvProcessor.BAL.Interface;
 public interface IImageService
 {
 
-    public Task<ImageServiceDto> ProcessImagesAsync(IEnumerable<IDictionary<string, object>> records, IDictionary<string, int> SkuIdDict);
+    public Task<ImageServiceDto> ProcessImagesAsync(IEnumerable<IDictionary<string, object>> records, IDictionary<string, int> SkuIdDict, ConcurrentDictionary<string, bool> processedGlobalUrls);
 }

@@ -22,23 +22,22 @@ public class ImageService : IImageService
             Directory.CreateDirectory(_imageDir);
     }
 
-    public async Task<ImageServiceDto> ProcessImagesAsync(IEnumerable<IDictionary<string, object>> records, IDictionary<string, int> SkuIdDict)
+    public async Task<ImageServiceDto> ProcessImagesAsync(IEnumerable<IDictionary<string, object>> records, IDictionary<string, int> SkuIdDict, ConcurrentDictionary<string, bool> processedGlobalUrls)
     {
 
         ImageServiceDto imageServiceDto = new();
         var tasks = new List<(string sku, string url, bool is_primary)>(records.Count() * 2);
-        var processedUrls = new ConcurrentDictionary<string, bool>();
 
         foreach (var record in records)
         {
             if (!record.TryGetValue("product_sku", out var sku)) continue;
-            if (string.IsNullOrEmpty(sku.ToString()) || !SkuIdDict.ContainsKey(sku.ToString()!)) continue;
+            if (string.IsNullOrEmpty(sku.ToString()) || !SkuIdDict.ContainsKey(sku.ToString()?.ToLower()!)) continue;
             int index = 0;
             foreach (var kv in record)
             {
                 if (kv.Key.StartsWith("image_url") && !string.IsNullOrWhiteSpace(kv.Value?.ToString()))
                 {
-                    tasks.Add((sku.ToString(), kv.Value.ToString(), index == 0)!);
+                    tasks.Add((sku.ToString()?.ToLower(), kv.Value.ToString(), index == 0)!);
                     index++;
                 }
             }
@@ -48,11 +47,10 @@ public class ImageService : IImageService
 
         foreach (var task in tasks)
         {
-            taskList.Add(ProcessUrlAsync(task, SkuIdDict, imageServiceDto, processedUrls));
+            taskList.Add(ProcessUrlAsync(task, SkuIdDict, imageServiceDto, processedGlobalUrls));
         }
 
         await Task.WhenAll(taskList);
-        imageServiceDto.ProcessedSuccessfullUrls = processedUrls.Count;
         return imageServiceDto;
     }
 
@@ -60,14 +58,13 @@ public class ImageService : IImageService
         (string sku, string url, bool is_primary) item,
         IDictionary<string, int> SkuIdDict,
         ImageServiceDto imageServiceDto,
-        ConcurrentDictionary<string, bool> processedUrls
+        ConcurrentDictionary<string, bool> processedGlobalUrls
     )
     {
         var (sku, url, is_primary) = item;
         string hash = GenerateHash(url);
         string imageFileName = $"{hash[..16]}.jpg";
         string fullPath = Path.Combine(_imageDir, imageFileName);
-
         if (!SkuIdDict.TryGetValue(sku, out var id)) return;
 
         if (!IsValidUrl(url))
@@ -80,8 +77,28 @@ public class ImageService : IImageService
         {
             if (isCorrectUrl)
             {
-                processedUrls[url] = true;
                 AddImage(imageServiceDto, id, imageFileName, is_primary);
+                if (!File.Exists(fullPath))
+                {
+                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+                    var response = await _httpClient.GetAsync(url, cts.Token);
+                    if (response.IsSuccessStatusCode)
+                    {
+                        _cache.Set(url, true, TimeSpan.FromHours(1));
+                        processedGlobalUrls.TryAdd(url, true);
+
+                        ImageProcessingQueue.ImageQueue.Enqueue(new ImageProcessDto()
+                        {
+                            ImagePath = fullPath,
+                            ResponseContent = response.Content
+                        });
+                    }
+                }
+                else
+                {
+                    processedGlobalUrls.TryAdd(url, true);
+                }
+
             }
             else
             {
@@ -92,7 +109,7 @@ public class ImageService : IImageService
 
         if (File.Exists(fullPath))
         {
-            processedUrls[url] = true;
+            processedGlobalUrls.TryAdd(url, true);
             _cache.Set(url, true, TimeSpan.FromHours(1));
             AddImage(imageServiceDto, id, imageFileName, is_primary);
             return;
@@ -104,7 +121,7 @@ public class ImageService : IImageService
             var response = await _httpClient.GetAsync(url, cts.Token);
             if (response.IsSuccessStatusCode)
             {
-                processedUrls[url] = true;
+                processedGlobalUrls.TryAdd(url, true);
                 _cache.Set(url, true, TimeSpan.FromHours(1));
                 AddImage(imageServiceDto, id, imageFileName, is_primary);
                 ImageProcessingQueue.ImageQueue.Enqueue(new ImageProcessDto()
@@ -129,7 +146,6 @@ public class ImageService : IImageService
             _cache.Set(url, false, TimeSpan.FromHours(1));
             LogError(imageServiceDto.ErrorMessageList, $"{sku}:Image URL {url} failed to download");
         }
-
     }
 
     private static string GenerateHash(string input)
@@ -149,9 +165,9 @@ public class ImageService : IImageService
     {
         imageServiceDto.ImageList.Add(new ProductImageDto
         {
-            product_id = id,
-            image_path = imageFileName,
-            is_primary = is_primary
+            Productid = id,
+            ImagePath = imageFileName.Trim().ToLower(),
+            IsPrimary = is_primary
         });
     }
     private static bool IsValidUrl(string url)

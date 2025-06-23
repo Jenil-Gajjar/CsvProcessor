@@ -1,6 +1,5 @@
-using System.Diagnostics;
+using System.Collections.Concurrent;
 using System.Globalization;
-using System.Text;
 using System.Text.RegularExpressions;
 using CsvHelper;
 using CsvHelper.Configuration;
@@ -13,6 +12,7 @@ namespace CsvProcessor.BAL.Implementation;
 
 public class CsvProcessorService : ICsvProcessorService
 {
+    private readonly ILogger<CsvProcessorService> _logger;
     private readonly IProductRepository _productRepository;
     private readonly ICategoryRepository _categoryRepository;
     private readonly IBrandRepository _brandRepository;
@@ -30,7 +30,8 @@ public class CsvProcessorService : ICsvProcessorService
         IShippingRepository shippingRepository,
         IInventoryRepository inventoryRepository,
         IProductImageRepository productImageRepository,
-        IImageService imageService
+        IImageService imageService,
+        ILogger<CsvProcessorService> logger
     )
     {
         _productRepository = productRepository;
@@ -41,6 +42,7 @@ public class CsvProcessorService : ICsvProcessorService
         _inventoryRepository = inventoryRepository;
         _productImageRepository = productImageRepository;
         _imageService = imageService;
+        _logger = logger;
     }
 
 
@@ -62,6 +64,8 @@ public class CsvProcessorService : ICsvProcessorService
             int RowCount = 0;
             int batchSize = 5000;
             List<Dictionary<string, object>> batch = new(batchSize);
+            ConcurrentDictionary<string, bool> processedGlobalUrls = new();
+
             while (csv.Read())
             {
                 RowCount++;
@@ -80,7 +84,7 @@ public class CsvProcessorService : ICsvProcessorService
 
                     if (batch.Count >= batchSize)
                     {
-                        await ProcessBatchAsync(batch, summary);
+                        await ProcessBatchAsync(batch, summary, processedGlobalUrls);
                         batch.Clear();
                     }
                 }
@@ -91,21 +95,23 @@ public class CsvProcessorService : ICsvProcessorService
             }
             if (batch.Any())
             {
-                await ProcessBatchAsync(batch, summary);
+                await ProcessBatchAsync(batch, summary, processedGlobalUrls);
                 batch.Clear();
             }
-
             summary.RowCount = RowCount;
+            summary.TotalSuccessfullUrls = processedGlobalUrls.Count;
 
         }
         catch (Exception e)
         {
             summary.Errors.Add(e.Message);
         }
+        _logger.LogInformation("File Processed Successfully!");
 
         return summary;
     }
-    private async Task ProcessBatchAsync(IEnumerable<Dictionary<string, object>> batch, ImportSummaryDto summary)
+    private async Task ProcessBatchAsync(IEnumerable<Dictionary<string, object>> batch, ImportSummaryDto summary, ConcurrentDictionary<string, bool> processedGlobalUrls
+)
     {
 
         ProductDto productDto = await _productRepository.BulkUpsertProductAsync(batch);
@@ -158,9 +164,8 @@ public class CsvProcessorService : ICsvProcessorService
         }
         try
         {
-            ImageServiceDto imageServiceDto = await _imageService.ProcessImagesAsync(batch, productDto.SkuToIdDict);
+            ImageServiceDto imageServiceDto = await _imageService.ProcessImagesAsync(batch, productDto.SkuToIdDict, processedGlobalUrls);
             summary.Errors.AddRange(imageServiceDto.ErrorMessageList);
-            summary.TotalSuccessfullUrls += imageServiceDto.ProcessedSuccessfullUrls;
             await _productImageRepository.BulkInsertImagesAsync(imageServiceDto.ImageList);
         }
         catch (Exception e)

@@ -29,9 +29,9 @@ public class InventoryRepository : IInventoryRepository
             {
                 if (kv.Key.StartsWith("warehouse_"))
                 {
-                    if (!SkuIdDict.TryGetValue(record["product_sku"].ToString() ?? "", out var product_id)) continue;
+                    if (!SkuIdDict.TryGetValue(record["product_sku"].ToString()?.ToLower() ?? "", out var product_id)) continue;
 
-                    var warehouseValue = kv.Key.Replace("warehouse_", "").Replace("_stock", "");
+                    var warehouseValue = kv.Key.Replace("warehouse_", "").Replace("_stock", "").Trim();
                     int stock = int.TryParse(kv.Value.ToString(), out var result) ? result : 0;
                     dataList.Add(new
                     {

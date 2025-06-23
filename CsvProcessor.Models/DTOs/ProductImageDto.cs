@@ -2,7 +2,7 @@ namespace CsvProcessor.Models.DTOs;
 
 public class ProductImageDto
 {
-    public int product_id { get; set; }
-    public string image_path { get; set; } = string.Empty;
-    public bool is_primary { get; set; }
+    public int Productid { get; set; }
+    public string ImagePath { get; set; } = string.Empty;
+    public bool IsPrimary { get; set; }
 }

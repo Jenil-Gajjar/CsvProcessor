@@ -22,21 +22,21 @@ public class ShippingRepository : IShippingRepository
         List<string> warnings = new();
         foreach (var record in records)
         {
-            if (!SkuIdDict.TryGetValue(record["product_sku"].ToString()!, out var id)) continue;
+            if (!SkuIdDict.TryGetValue(record["product_sku"].ToString()?.ToLower()!, out var id)) continue;
             string? shipping_class = record["shipping_class"].ToString();
             if (string.IsNullOrWhiteSpace(shipping_class))
             {
-                shipping_class = "Standard";
-                warnings.Add($"{record["product_sku"]}:Invalid shipping class defaulted to 'Standard'");
+                shipping_class = "standard";
+                warnings.Add($"{record["product_sku"]}:Invalid shipping class defaulted to 'standard'");
             }
             dataList.Add(new
             {
                 product_id = id,
-                shipping_class
+                shipping_class = shipping_class.ToString().Trim().ToLower()
             });
         }
         var jsonData = JsonSerializer.Serialize(dataList);
-        await conn.ExecuteAsync("select fn_shipping_class_bulk_insert(@data::jsonb)", new { data = jsonData });
+        await conn.ExecuteAsync("select * from fn_shipping_class_bulk_insert(@data::jsonb)", new { data = jsonData });
         return warnings;
     }
 }

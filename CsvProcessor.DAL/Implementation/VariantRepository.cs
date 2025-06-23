@@ -15,7 +15,7 @@ public class VariantRepository : IVariantRepository
         _conn = configuration.GetConnectionString("MyConnectionString")!;
 
     }
- 
+
     public async Task BulkInsertVariantAsync(IEnumerable<IDictionary<string, object>> records,
     IDictionary<string, int> SkuIdDict
     )
@@ -28,7 +28,7 @@ public class VariantRepository : IVariantRepository
             {
                 if (kv.Key.StartsWith("variant_type_"))
                 {
-                    if (!SkuIdDict.TryGetValue(record["product_sku"].ToString() ?? "", out var product_id)) continue;
+                    if (!SkuIdDict.TryGetValue(record["product_sku"].ToString()?.ToLower() ?? "", out var product_id)) continue;
 
                     var suffix = kv.Key.Replace("variant_type_", "");
                     var variantValueKey = $"variant_value_{suffix}";
@@ -40,8 +40,8 @@ public class VariantRepository : IVariantRepository
                         dataList.Add(new
                         {
                             product_id,
-                            variant_type = type,
-                            variant_value = value
+                            variant_type = type.ToString().Trim().ToLower(),
+                            variant_value = value.ToString()?   .Trim().ToLower()
                         });
                     }
                 }
