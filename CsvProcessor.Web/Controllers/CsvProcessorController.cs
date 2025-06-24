@@ -28,6 +28,19 @@ public class CsvProcessorController : Controller
         content.AppendLine($"Total Skipped Records:{summary.RowCount - summary.InsertedRecords - summary.UpdatedRecords}");
         content.AppendLine($"Total Url Successfully Processed:{summary.TotalSuccessfullUrls}");
         content.AppendLine($"Total Inventory Updates Performed:{summary.UpdatedInventoryCount}");
+
+        if (summary.Information.Values.Any(list => list != null && list.Any()))
+        {
+            content.AppendLine("\nInformation:");
+        }
+        foreach (var kv in summary.Information)
+        {
+            if (kv.Value.Any())
+            {
+                content.AppendLine($"\n{kv.Key}");
+                kv.Value.ForEach(e => content.AppendLine(e));
+            }
+        }
         if (summary.Warnings.Any())
         {
             content.AppendLine("\nWarnings:");

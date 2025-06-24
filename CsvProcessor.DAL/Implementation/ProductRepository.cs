@@ -20,16 +20,24 @@ public class ProductRepository : IProductRepository
         _logger = logger;
     }
 
-    public async Task<ProductDto> BulkUpsertProductAsync(IEnumerable<Dictionary<string, object>> records)
+    public async Task<ProductDto> BulkUpsertProductAsync(IEnumerable<Dictionary<string, object>> records, ImportSummaryDto summary)
     {
         var dataList = new List<object>();
 
+        List<string> statues = new() { "active", "inactive", "discontinued" };
+
         foreach (var record in records)
         {
-            string? status = record["status"].ToString();
+            string? status = record["status"].ToString()?.Trim().ToLower();
             if (string.IsNullOrWhiteSpace(status))
             {
-                status = "Active";
+                status = "active";
+                summary.Warnings.Add($"{record["product_sku"]}:Invalid Status defaulted to 'active'");
+            }
+            if (!statues.Contains(status))
+            {
+                summary.Warnings.Add($"{record["product_sku"]}: Invalid Status ");
+                continue;
             }
             dataList.Add(new
             {
@@ -40,7 +48,7 @@ public class ProductRepository : IProductRepository
                 supplier_sku = record["supplier_sku"].ToString()?.Trim().ToLower(),
                 weight_kg = record["weight_kg"].ToString()?.Trim().ToLower(),
                 dimensions_cm = record["dimensions_cm"].ToString()?.Trim().ToLower(),
-                status = status.ToString().ToLower(),
+                status,
             });
         }
 

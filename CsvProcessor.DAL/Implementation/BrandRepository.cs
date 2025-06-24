@@ -1,5 +1,6 @@
 using System.Text.Json;
 using CsvProcessor.DAL.Interface;
+using CsvProcessor.Models.DTOs;
 using Dapper;
 using Microsoft.Extensions.Configuration;
 using Npgsql;
@@ -15,7 +16,7 @@ public class BrandRepository : IBrandRepository
         _conn = configuration.GetConnectionString("MyConnectionString")!;
     }
 
-    public async Task BulkInsertBrandAsync(IEnumerable<IDictionary<string, object>> records, IDictionary<string, int> SkuIdDict)
+    public async Task BulkInsertBrandAsync(IEnumerable<IDictionary<string, object>> records, IDictionary<string, int> SkuIdDict, ImportSummaryDto summary)
     {
 
         using var conn = new NpgsqlConnection(_conn);
@@ -32,7 +33,10 @@ public class BrandRepository : IBrandRepository
         }
 
         var jsonData = JsonSerializer.Serialize(dataList);
-        var result = await conn.QueryAsync("select * from fn_brand_bulk_insert(@data::jsonb)", new { data = jsonData });
-
+        var brandNames = await conn.QueryAsync<string>("select * from fn_brand_bulk_insert(@data::jsonb)", new { data = jsonData });
+        foreach (var brandName in brandNames)
+        {
+            summary.Information["Brand"].Add($"Brand {brandName} is created");
+        }
     }
 }

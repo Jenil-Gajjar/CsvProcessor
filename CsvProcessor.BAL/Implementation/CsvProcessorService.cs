@@ -114,7 +114,7 @@ public class CsvProcessorService : ICsvProcessorService
 )
     {
 
-        ProductDto productDto = await _productRepository.BulkUpsertProductAsync(batch);
+        ProductDto productDto = await _productRepository.BulkUpsertProductAsync(batch, summary);
         if (productDto.SkuToIdDict == null) throw new Exception("Sku To Id Dictionary Is Null");
 
         summary.InsertedRecords += productDto.InsertedRecords;
@@ -122,7 +122,7 @@ public class CsvProcessorService : ICsvProcessorService
 
         try
         {
-            await _categoryRepository.BulkInsertCategoryAsync(batch, productDto.SkuToIdDict);
+            await _categoryRepository.BulkInsertCategoryAsync(batch, productDto.SkuToIdDict, summary);
         }
         catch (Exception e)
         {
@@ -130,7 +130,7 @@ public class CsvProcessorService : ICsvProcessorService
         }
         try
         {
-            await _brandRepository.BulkInsertBrandAsync(batch, productDto.SkuToIdDict);
+            await _brandRepository.BulkInsertBrandAsync(batch, productDto.SkuToIdDict, summary);
         }
         catch (Exception e)
         {
@@ -138,8 +138,7 @@ public class CsvProcessorService : ICsvProcessorService
         }
         try
         {
-            var warnings = await _shippingRepository.BulkInsertShippingClassAsync(batch, productDto.SkuToIdDict);
-            summary.Warnings.AddRange(warnings);
+            await _shippingRepository.BulkInsertShippingClassAsync(batch, productDto.SkuToIdDict, summary);
         }
         catch (Exception e)
         {

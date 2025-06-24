@@ -1,5 +1,6 @@
 using System.Text.Json;
 using CsvProcessor.DAL.Interface;
+using CsvProcessor.Models.DTOs;
 using Dapper;
 using Microsoft.Extensions.Configuration;
 using Npgsql;
@@ -15,7 +16,7 @@ public class CategoryRepository : ICategoryRepository
     }
 
 
-    public async Task BulkInsertCategoryAsync(IEnumerable<IDictionary<string, object>> records, IDictionary<string, int> SkuIdDict)
+    public async Task BulkInsertCategoryAsync(IEnumerable<IDictionary<string, object>> records, IDictionary<string, int> SkuIdDict, ImportSummaryDto summary)
     {
 
         using var conn = new NpgsqlConnection(_conn);
@@ -34,6 +35,10 @@ public class CategoryRepository : ICategoryRepository
 
         var jsonData = JsonSerializer.Serialize(dataList);
 
-        await conn.ExecuteAsync("select fn_category_bulk_insert(@data::jsonb)", new { data = jsonData });
+        var categoryNames = await conn.QueryAsync<(string sku, string category)>("select * from fn_category_bulk_insert(@data::jsonb)", new { data = jsonData });
+        foreach (var (sku, category) in categoryNames)
+        {
+            summary.Information["Category"].Add($"Category {category} created for product {sku}");
+        }
     }
 }

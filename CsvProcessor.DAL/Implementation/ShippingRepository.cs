@@ -1,5 +1,6 @@
 using System.Text.Json;
 using CsvProcessor.DAL.Interface;
+using CsvProcessor.Models.DTOs;
 using Dapper;
 using Microsoft.Extensions.Configuration;
 using Npgsql;
@@ -15,7 +16,7 @@ public class ShippingRepository : IShippingRepository
     }
 
 
-    public async Task<List<string>> BulkInsertShippingClassAsync(IEnumerable<IDictionary<string, object>> records, IDictionary<string, int> SkuIdDict)
+    public async Task BulkInsertShippingClassAsync(IEnumerable<IDictionary<string, object>> records, IDictionary<string, int> SkuIdDict, ImportSummaryDto summary)
     {
         using var conn = new NpgsqlConnection(_conn);
         var dataList = new List<object>();
@@ -23,7 +24,7 @@ public class ShippingRepository : IShippingRepository
         foreach (var record in records)
         {
             if (!SkuIdDict.TryGetValue(record["product_sku"].ToString()?.ToLower()!, out var id)) continue;
-            string? shipping_class = record["shipping_class"].ToString();
+            string? shipping_class = record["shipping_class"].ToString()?.Trim().ToLower();
             if (string.IsNullOrWhiteSpace(shipping_class))
             {
                 shipping_class = "standard";
@@ -32,12 +33,13 @@ public class ShippingRepository : IShippingRepository
             dataList.Add(new
             {
                 product_id = id,
-                shipping_class = shipping_class.ToString().Trim().ToLower()
+                shipping_class
             });
         }
         var jsonData = JsonSerializer.Serialize(dataList);
         await conn.ExecuteAsync("select * from fn_shipping_class_bulk_insert(@data::jsonb)", new { data = jsonData });
-        return warnings;
+        summary.Warnings.AddRange(warnings);
+
     }
 }
 
