@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using CsvProcessor.DAL.Interface;
+using CsvProcessor.Models.Constants;
 using CsvProcessor.Models.DTOs;
 using Dapper;
 using Microsoft.Extensions.Configuration;
@@ -13,7 +14,7 @@ public class ProductImageRepository : IProductImageRepository
     private readonly string _conn;
     public ProductImageRepository(IConfiguration configuration)
     {
-        _conn = configuration.GetConnectionString("MyConnectionString")!;
+        _conn = configuration.GetConnectionString(Constants.MyConnectionString)!;
     }
 
     public async Task BulkInsertImagesAsync(ConcurrentBag<ProductImageDto>? set)

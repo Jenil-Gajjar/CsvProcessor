@@ -3,6 +3,7 @@ using CsvProcessor.DAL.Interface;
 using Dapper;
 using Npgsql;
 using System.Text.Json;
+using CsvProcessor.Models.Constants;
 
 namespace CsvProcessor.DAL.Implementation;
 
@@ -12,7 +13,8 @@ public class VariantRepository : IVariantRepository
 
     public VariantRepository(IConfiguration configuration)
     {
-        _conn = configuration.GetConnectionString("MyConnectionString")!;
+
+        _conn = configuration.GetConnectionString(Constants.MyConnectionString)!;
 
     }
 
@@ -26,12 +28,12 @@ public class VariantRepository : IVariantRepository
         {
             foreach (var kv in record)
             {
-                if (kv.Key.StartsWith("variant_type_"))
+                if (kv.Key.StartsWith(Constants.variant_type_))
                 {
-                    if (!SkuIdDict.TryGetValue(record["product_sku"].ToString()?.ToLower() ?? "", out var product_id)) continue;
+                    if (!SkuIdDict.TryGetValue(record[Constants.product_sku].ToString()?.ToLower() ?? "", out var product_id)) continue;
 
-                    var suffix = kv.Key.Replace("variant_type_", "");
-                    var variantValueKey = $"variant_value_{suffix}";
+                    var suffix = kv.Key.Replace(Constants.variant_type_, "");
+                    var variantValueKey = $"${Constants.variant_value_}{suffix}";
                     var type = kv.Value.ToString();
                     if (!record.TryGetValue(variantValueKey, out var value)) continue;
 
@@ -41,7 +43,7 @@ public class VariantRepository : IVariantRepository
                         {
                             product_id,
                             variant_type = type.ToString().Trim().ToLower(),
-                            variant_value = value.ToString()?   .Trim().ToLower()
+                            variant_value = value.ToString()?.Trim().ToLower()
                         });
                     }
                 }

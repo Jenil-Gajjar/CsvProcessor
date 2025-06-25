@@ -1,5 +1,6 @@
 using System.Text.Json;
 using CsvProcessor.DAL.Interface;
+using CsvProcessor.Models.Constants;
 using Dapper;
 using Microsoft.Extensions.Configuration;
 using Npgsql;
@@ -13,7 +14,7 @@ public class InventoryRepository : IInventoryRepository
 
     public InventoryRepository(IConfiguration configuration)
     {
-        _conn = configuration.GetConnectionString("MyConnectionString")!;
+        _conn = configuration.GetConnectionString(Constants.MyConnectionString)!;
 
     }
 
@@ -27,11 +28,11 @@ public class InventoryRepository : IInventoryRepository
         {
             foreach (var kv in record)
             {
-                if (kv.Key.StartsWith("warehouse_"))
+                if (kv.Key.StartsWith(Constants.warehouse_))
                 {
-                    if (!SkuIdDict.TryGetValue(record["product_sku"].ToString()?.ToLower() ?? "", out var product_id)) continue;
+                    if (!SkuIdDict.TryGetValue(record[Constants.product_sku].ToString()?.ToLower() ?? "", out var product_id)) continue;
 
-                    var warehouseValue = kv.Key.Replace("warehouse_", "").Replace("_stock", "").Trim();
+                    var warehouseValue = kv.Key.Replace(Constants.warehouse_, "").Replace(Constants._stock, "").Trim();
                     if (string.IsNullOrWhiteSpace(warehouseValue)) continue;
                     int stock = int.TryParse(kv.Value.ToString(), out var result) ? result : 0;
                     dataList.Add(new

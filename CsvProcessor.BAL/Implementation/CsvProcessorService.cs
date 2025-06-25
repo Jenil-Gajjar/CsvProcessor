@@ -5,6 +5,7 @@ using CsvHelper;
 using CsvHelper.Configuration;
 using CsvProcessor.BAL.Interface;
 using CsvProcessor.DAL.Interface;
+using CsvProcessor.Models.Constants;
 using CsvProcessor.Models.DTOs;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
@@ -183,15 +184,19 @@ public class CsvProcessorService : ICsvProcessorService
     private static bool ValidateDictionary(IDictionary<string, object> dict, int RowCount, ImportSummaryDto summary)
     {
         bool IsValid = true;
-        HashSet<string> validStatues = new() { "active", "inactive", "discontinued" };
+        HashSet<string> validStatues = new() {
+            Constants.active_status,
+            Constants.inactive_status,
+            Constants.discontinued_status
+        };
 
-        string sku = GetString(dict, "product_sku");
-        string name = GetString(dict, "product_name");
-        string status = GetString(dict, "status");
-        string base_price = GetString(dict, "base_price");
-        string weight_kg = GetString(dict, "weight_kg");
-        string dimensions_cm = GetString(dict, "dimensions_cm");
-        string shipping_class = GetString(dict, "shipping_class");
+        string sku = GetString(dict, Constants.product_sku);
+        string name = GetString(dict, Constants.product_name);
+        string status = GetString(dict, Constants.status);
+        string base_price = GetString(dict, Constants.base_price);
+        string weight_kg = GetString(dict, Constants.weight_kg);
+        string dimensions_cm = GetString(dict, Constants.dimensions_cm);
+        string shipping_class = GetString(dict, Constants.shipping_class);
 
         if (string.IsNullOrWhiteSpace(sku))
         {
@@ -207,7 +212,7 @@ public class CsvProcessorService : ICsvProcessorService
 
         if (string.IsNullOrWhiteSpace(status))
         {
-            dict["status"] = status = "active";
+            dict[Constants.status] = status = Constants.active_status;
             summary.Warnings.Add($"Row {RowCount} {sku}:Invalid Status defaulted to 'active'");
         }
 
@@ -219,7 +224,7 @@ public class CsvProcessorService : ICsvProcessorService
 
         if (string.IsNullOrWhiteSpace(shipping_class))
         {
-            dict["shipping_class"] = "standard";
+            dict[Constants.shipping_class] = Constants.standard_shipping_class;
             summary.Warnings.Add($"Row {RowCount} {sku}:Invalid shipping class defaulted to 'standard'");
         }
 
@@ -255,7 +260,7 @@ public class CsvProcessorService : ICsvProcessorService
 
     public static bool HasAtLeastOneImageUrl(IDictionary<string, object> dict)
     {
-        return dict.Keys.Any(k => k.StartsWith("image_url") && !string.IsNullOrWhiteSpace(dict[k]?.ToString()));
+        return dict.Keys.Any(k => k.StartsWith(Constants.image_url) && !string.IsNullOrWhiteSpace(dict[k]?.ToString()));
     }
 
 

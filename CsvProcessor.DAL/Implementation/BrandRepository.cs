@@ -1,5 +1,6 @@
 using System.Text.Json;
 using CsvProcessor.DAL.Interface;
+using CsvProcessor.Models.Constants;
 using CsvProcessor.Models.DTOs;
 using Dapper;
 using Microsoft.Extensions.Configuration;
@@ -13,7 +14,7 @@ public class BrandRepository : IBrandRepository
 
     public BrandRepository(IConfiguration configuration)
     {
-        _conn = configuration.GetConnectionString("MyConnectionString")!;
+        _conn = configuration.GetConnectionString(Constants.MyConnectionString)!;
     }
 
     public async Task BulkInsertBrandAsync(IEnumerable<IDictionary<string, object>> records, IDictionary<string, int> SkuIdDict, ImportSummaryDto summary)
@@ -22,13 +23,13 @@ public class BrandRepository : IBrandRepository
         using var conn = new NpgsqlConnection(_conn);
         var dataList = new List<object>();
 
-        foreach (var record in records.Where(kv => !string.IsNullOrEmpty(kv["brand_name"].ToString())))
+        foreach (var record in records.Where(kv => !string.IsNullOrEmpty(kv[Constants.brand_name].ToString())))
         {
-            if (!SkuIdDict.TryGetValue(record["product_sku"].ToString()?.ToLower()!, out var id)) continue;
+            if (!SkuIdDict.TryGetValue(record[Constants.product_sku].ToString()?.ToLower()!, out var id)) continue;
             dataList.Add(new
             {
                 product_id = id,
-                brand_name = record["brand_name"].ToString()?.Trim().ToLower()
+                brand_name = record[Constants.brand_name].ToString()?.Trim().ToLower()
             });
         }
 
@@ -36,7 +37,7 @@ public class BrandRepository : IBrandRepository
         var brandNames = await conn.QueryAsync<string>("select * from fn_brand_bulk_insert(@data::jsonb)", new { data = jsonData });
         foreach (var brandName in brandNames)
         {
-            summary.Information["Brand"].Add($"Brand {brandName} is created");
+            summary.Information[Constants.Brand].Add($"Brand {brandName} is created");
         }
     }
 }

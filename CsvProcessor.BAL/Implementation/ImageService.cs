@@ -6,12 +6,13 @@ using CsvProcessor.BAL.Helper;
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Caching.Memory;
 using System.Net;
+using CsvProcessor.Models.Constants;
 
 namespace CsvProcessor.BAL.Implementation;
 
 public class ImageService : IImageService
 {
-    private readonly static string _imageDir = Path.Combine("wwwroot", "images");
+    private readonly static string _imageDir = Constants.ImageDirectory;
     private readonly IMemoryCache _cache;
     private readonly HttpClient _httpClient;
     public ImageService(HttpClient httpClient, IMemoryCache cache)
@@ -30,12 +31,12 @@ public class ImageService : IImageService
 
         foreach (var record in records)
         {
-            if (!record.TryGetValue("product_sku", out var sku)) continue;
+            if (!record.TryGetValue(Constants.product_sku, out var sku)) continue;
             if (string.IsNullOrEmpty(sku.ToString()) || !SkuIdDict.ContainsKey(sku.ToString()?.ToLower()!)) continue;
             int index = 0;
             foreach (var kv in record)
             {
-                if (kv.Key.StartsWith("image_url") && !string.IsNullOrWhiteSpace(kv.Value?.ToString()))
+                if (kv.Key.StartsWith(Constants.image_url) && !string.IsNullOrWhiteSpace(kv.Value?.ToString()))
                 {
                     ItemList.Add((sku.ToString()?.ToLower(), kv.Value.ToString(), index == 0)!);
                     index++;

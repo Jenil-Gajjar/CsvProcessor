@@ -4,10 +4,11 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Processing;
+using CsvProcessor.Models.Constants;
 
 public class FileDonwloaderWorker : BackgroundService
 {
-    private readonly static string _imageDir = Path.Combine("wwwroot", "images");
+    private readonly static string _imageDir = Constants.ImageDirectory;
 
     private readonly ILogger<FileDonwloaderWorker> _logger;
 

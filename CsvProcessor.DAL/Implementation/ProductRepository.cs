@@ -1,5 +1,6 @@
 using System.Text.Json;
 using CsvProcessor.DAL.Interface;
+using CsvProcessor.Models.Constants;
 using CsvProcessor.Models.DTOs;
 using Dapper;
 using Microsoft.Extensions.Configuration;
@@ -16,7 +17,7 @@ public class ProductRepository : IProductRepository
 
     public ProductRepository(IConfiguration configuration, ILogger<ProductRepository> logger)
     {
-        _conn = configuration.GetConnectionString("MyConnectionString")!;
+        _conn = configuration.GetConnectionString(Constants.MyConnectionString)!;
         _logger = logger;
     }
 
@@ -27,14 +28,14 @@ public class ProductRepository : IProductRepository
         {
             dataList.Add(new
             {
-                product_sku = GetString(record, "product_sku"),
-                product_name = GetString(record, "product_name"),
-                description = GetString(record, "description"),
-                base_price = GetString(record, "base_price"),
-                supplier_sku = GetString(record, "supplier_sku"),
-                weight_kg = GetString(record, "weight_kg"),
-                dimensions_cm = GetString(record, "dimensions_cm"),
-                status = GetString(record, "status"),
+                product_sku = GetString(record, Constants.product_sku),
+                product_name = GetString(record, Constants.product_name),
+                description = GetString(record, Constants.description),
+                base_price = GetString(record, Constants.base_price),
+                supplier_sku = GetString(record, Constants.supplier_sku),
+                weight_kg = GetString(record, Constants.weight_kg),
+                dimensions_cm = GetString(record, Constants.dimensions_cm),
+                status = GetString(record, Constants.status),
             });
         }
 

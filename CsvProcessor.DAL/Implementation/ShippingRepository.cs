@@ -1,5 +1,6 @@
 using System.Text.Json;
 using CsvProcessor.DAL.Interface;
+using CsvProcessor.Models.Constants;
 using CsvProcessor.Models.DTOs;
 using Dapper;
 using Microsoft.Extensions.Configuration;
@@ -12,7 +13,7 @@ public class ShippingRepository : IShippingRepository
     private readonly string _conn;
     public ShippingRepository(IConfiguration configuration)
     {
-        _conn = configuration.GetConnectionString("MyConnectionString")!;
+        _conn = configuration.GetConnectionString(Constants.MyConnectionString)!;
     }
 
 
@@ -22,8 +23,8 @@ public class ShippingRepository : IShippingRepository
         var dataList = new List<object>();
         foreach (var record in records)
         {
-            if (!SkuIdDict.TryGetValue(record["product_sku"].ToString()?.ToLower()!, out var id)) continue;
-            string? shipping_class = record["shipping_class"].ToString()?.Trim().ToLower();
+            if (!SkuIdDict.TryGetValue(record[Constants.product_sku].ToString()?.ToLower()!, out var id)) continue;
+            string? shipping_class = record[Constants.shipping_class].ToString()?.Trim().ToLower();
             dataList.Add(new
             {
                 product_id = id,

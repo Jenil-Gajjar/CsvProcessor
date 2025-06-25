@@ -1,4 +1,5 @@
 namespace CsvProcessor.Models.DTOs;
+using CsvProcessor.Models.Constants;
 public class ImportSummaryDto
 {
     public int RowCount { get; set; }
@@ -7,8 +8,8 @@ public class ImportSummaryDto
     public int TotalSuccessfullUrls { get; set; }
     public Dictionary<string, List<string>> Information = new()
     {
-        { "Category", new List<string>() },
-        { "Brand", new List<string>() },
+        { Constants.Category, new List<string>() },
+        { Constants.Brand, new List<string>() },
     };
     public List<string> Errors { get; set; } = new();
     public List<string> Warnings { get; set; } = new();

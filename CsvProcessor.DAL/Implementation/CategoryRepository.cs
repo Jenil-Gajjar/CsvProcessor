@@ -1,5 +1,6 @@
 using System.Text.Json;
 using CsvProcessor.DAL.Interface;
+using CsvProcessor.Models.Constants;
 using CsvProcessor.Models.DTOs;
 using Dapper;
 using Microsoft.Extensions.Configuration;
@@ -12,7 +13,7 @@ public class CategoryRepository : ICategoryRepository
     private readonly string _conn;
     public CategoryRepository(IConfiguration configuration)
     {
-        _conn = configuration.GetConnectionString("MyConnectionString")!;
+        _conn = configuration.GetConnectionString(Constants.MyConnectionString)!;
     }
 
 
@@ -22,13 +23,13 @@ public class CategoryRepository : ICategoryRepository
         using var conn = new NpgsqlConnection(_conn);
         var dataList = new List<object>();
 
-        foreach (var record in records.Where(kv => !string.IsNullOrEmpty(kv["category_path"].ToString())))
+        foreach (var record in records.Where(kv => !string.IsNullOrEmpty(kv[Constants.category_path].ToString())))
         {
-            if (!SkuIdDict.TryGetValue(record["product_sku"].ToString()?.ToLower()!, out var id)) continue;
+            if (!SkuIdDict.TryGetValue(record[Constants.product_sku].ToString()?.ToLower()!, out var id)) continue;
             dataList.Add(new
             {
                 product_id = id,
-                category_path = record["category_path"].ToString()?.Trim()
+                category_path = record[Constants.category_path].ToString()?.Trim()
             });
         }
 
@@ -38,7 +39,7 @@ public class CategoryRepository : ICategoryRepository
         var categoryNames = await conn.QueryAsync<(string sku, string category)>("select * from fn_category_bulk_insert(@data::jsonb)", new { data = jsonData });
         foreach (var (sku, category) in categoryNames)
         {
-            summary.Information["Category"].Add($"Category {category} created for product {sku}");
+            summary.Information[Constants.Category].Add($"Category {category} created for product {sku}");
         }
     }
 }
