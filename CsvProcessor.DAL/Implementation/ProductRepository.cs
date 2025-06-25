@@ -23,32 +23,18 @@ public class ProductRepository : IProductRepository
     public async Task<ProductDto> BulkUpsertProductAsync(IEnumerable<Dictionary<string, object>> records, ImportSummaryDto summary)
     {
         var dataList = new List<object>();
-
-        List<string> statues = new() { "active", "inactive", "discontinued" };
-
         foreach (var record in records)
         {
-            string? status = record["status"].ToString()?.Trim().ToLower();
-            if (string.IsNullOrWhiteSpace(status))
-            {
-                status = "active";
-                summary.Warnings.Add($"{record["product_sku"]}:Invalid Status defaulted to 'active'");
-            }
-            if (!statues.Contains(status))
-            {
-                summary.Warnings.Add($"{record["product_sku"]}: Invalid Status ");
-                continue;
-            }
             dataList.Add(new
             {
-                product_sku = record["product_sku"].ToString()?.Trim().ToLower(),
-                product_name = record["product_name"].ToString()?.Trim().ToLower(),
-                description = record["description"].ToString()?.Trim().ToLower(),
-                base_price = record["base_price"].ToString()?.Trim().ToLower(),
-                supplier_sku = record["supplier_sku"].ToString()?.Trim().ToLower(),
-                weight_kg = record["weight_kg"].ToString()?.Trim().ToLower(),
-                dimensions_cm = record["dimensions_cm"].ToString()?.Trim().ToLower(),
-                status,
+                product_sku = GetString(record, "product_sku"),
+                product_name = GetString(record, "product_name"),
+                description = GetString(record, "description"),
+                base_price = GetString(record, "base_price"),
+                supplier_sku = GetString(record, "supplier_sku"),
+                weight_kg = GetString(record, "weight_kg"),
+                dimensions_cm = GetString(record, "dimensions_cm"),
+                status = GetString(record, "status"),
             });
         }
 
@@ -73,6 +59,10 @@ public class ProductRepository : IProductRepository
             _logger.LogError("{Message}", e.Message);
             throw;
         }
+    }
 
+    public static string? GetString(Dictionary<string, object> dict, string key)
+    {
+        return dict[key].ToString()?.Trim().ToLower();
     }
 }

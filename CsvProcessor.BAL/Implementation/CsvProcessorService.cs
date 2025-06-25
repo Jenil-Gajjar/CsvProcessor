@@ -68,17 +68,17 @@ public class CsvProcessorService : ICsvProcessorService
 
             while (csv.Read())
             {
-                RowCount++;
-                var dict = new Dictionary<string, object>();
-                if (csv.HeaderRecord != null)
-                {
-                    foreach (var header in csv.HeaderRecord)
-                    {
-                        dict[header] = csv.GetField(header)!;
-                    }
-                }
                 try
                 {
+                    RowCount++;
+                    var dict = new Dictionary<string, object>();
+                    if (csv.HeaderRecord != null)
+                    {
+                        foreach (var header in csv.HeaderRecord)
+                        {
+                            dict[header] = csv.GetField(header)!;
+                        }
+                    }
                     if (ValidateDictionary(dict, RowCount, summary))
                         batch.Add(dict);
 
@@ -138,7 +138,7 @@ public class CsvProcessorService : ICsvProcessorService
         }
         try
         {
-            await _shippingRepository.BulkInsertShippingClassAsync(batch, productDto.SkuToIdDict, summary);
+            await _shippingRepository.BulkInsertShippingClassAsync(batch, productDto.SkuToIdDict);
         }
         catch (Exception e)
         {
@@ -176,53 +176,96 @@ public class CsvProcessorService : ICsvProcessorService
     }
     private static bool IsValidDimention(string? value)
     {
-        if (string.IsNullOrEmpty(value) || string.IsNullOrWhiteSpace(value)) return false;
+        if (string.IsNullOrWhiteSpace(value?.Trim())) return true;
         string pattern = @"^\d+(\.\d+)?x\d+(\.\d+)?x\d+(\.\d+)?$";
         return Regex.IsMatch(value!, pattern);
     }
     private static bool ValidateDictionary(IDictionary<string, object> dict, int RowCount, ImportSummaryDto summary)
     {
         bool IsValid = true;
-        if (!IsValidDimention(dict["dimensions_cm"].ToString()))
+        HashSet<string> validStatues = new() { "active", "inactive", "discontinued" };
+
+        string sku = GetString(dict, "product_sku");
+        string name = GetString(dict, "product_name");
+        string status = GetString(dict, "status");
+        string base_price = GetString(dict, "base_price");
+        string weight_kg = GetString(dict, "weight_kg");
+        string dimensions_cm = GetString(dict, "dimensions_cm");
+        string shipping_class = GetString(dict, "shipping_class");
+
+        if (string.IsNullOrWhiteSpace(sku))
         {
             IsValid = false;
-            summary.Warnings.Add($"Row {RowCount} {dict["product_sku"]}:Invalid dimensions. Use the format LxWxH");
+            summary.Warnings.Add($"Row {RowCount} : Invalid sku ");
+        }
+
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            IsValid = false;
+            summary.Warnings.Add($"Row {RowCount} {sku}: Invalid name ");
+        }
+
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            dict["status"] = status = "active";
+            summary.Warnings.Add($"Row {RowCount} {sku}:Invalid Status defaulted to 'active'");
+        }
+
+        if (!validStatues.Contains(status))
+        {
+            IsValid = false;
+            summary.Warnings.Add($"Row {RowCount} {sku}: Invalid Status ");
+        }
+
+        if (string.IsNullOrWhiteSpace(shipping_class))
+        {
+            dict["shipping_class"] = "standard";
+            summary.Warnings.Add($"Row {RowCount} {sku}:Invalid shipping class defaulted to 'standard'");
+        }
+
+        if (!IsValidDimention(dimensions_cm))
+        {
+            IsValid = false;
+            summary.Warnings.Add($"Row {RowCount} {sku}:Invalid dimensions. Use the format LxWxH");
         };
 
-        var hasValidImage = dict.Keys.Any(k => k.StartsWith("image_url") && !string.IsNullOrWhiteSpace(dict[k]?.ToString()));
-        if (!hasValidImage)
+        if (!HasAtLeastOneImageUrl(dict))
         {
             IsValid = false;
-            summary.Warnings.Add($"Row {RowCount} {dict["product_sku"]}:At least one image is required");
+            summary.Warnings.Add($"Row {RowCount} {sku}:At least one image is required");
         }
 
-        if (decimal.TryParse(dict["base_price"].ToString(), out var basePrice))
-        {
-            if (basePrice <= 0)
-            {
-                IsValid = false;
-                summary.Warnings.Add($"Row {RowCount} {dict["product_sku"]}:Base Price is not postitive");
-            }
-        }
-        else
+        if (!IsPositive(base_price))
         {
             IsValid = false;
-            summary.Warnings.Add($"Row {RowCount} {dict["product_sku"]}: Invalid price format");
+            summary.Warnings.Add($"Row {RowCount} {sku}:Base Price is not postitive");
         }
-        if (decimal.TryParse(dict["weight_kg"].ToString(), out var weightKg))
+
+        if (!string.IsNullOrWhiteSpace(weight_kg))
         {
-            if (weightKg <= 0)
+            if (!IsPositive(weight_kg))
             {
                 IsValid = false;
-                summary.Warnings.Add($"Row {RowCount} {dict["product_sku"]}:Weight is not postitive");
+                summary.Warnings.Add($"Row {RowCount} {sku}:Weight is not postitive");
             }
         }
-        else
-        {
-            IsValid = false;
-            summary.Warnings.Add($"Row {RowCount} {dict["product_sku"]}: Invalid Weight format");
-        }
+
         return IsValid;
     }
 
+    public static bool HasAtLeastOneImageUrl(IDictionary<string, object> dict)
+    {
+        return dict.Keys.Any(k => k.StartsWith("image_url") && !string.IsNullOrWhiteSpace(dict[k]?.ToString()));
+    }
+
+
+    public static string GetString(IDictionary<string, object> dict, string key)
+    {
+        return dict.ContainsKey(key) ? dict[key].ToString()?.Trim().ToLower() ?? string.Empty : string.Empty;
+    }
+
+    public static bool IsPositive(string value)
+    {
+        return decimal.TryParse(value, out var result) && result > 0;
+    }
 }

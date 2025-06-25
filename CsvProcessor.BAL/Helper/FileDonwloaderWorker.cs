@@ -31,7 +31,6 @@ public class FileDonwloaderWorker : BackgroundService
                 {
                     await File.WriteAllBytesAsync(imageProcessDto.ImagePath, imageBytes, stoppingToken);
 
-
                     using var image = Image.Load(filePath);
                     foreach (var size in new[] { ("thumb", 150), ("medium", 600) })
                     {

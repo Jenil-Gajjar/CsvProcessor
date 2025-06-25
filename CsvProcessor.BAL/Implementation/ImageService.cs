@@ -26,7 +26,7 @@ public class ImageService : IImageService
     {
 
         ImageServiceDto imageServiceDto = new();
-        var tasks = new List<(string sku, string url, bool is_primary)>(records.Count() * 2);
+        var ItemList = new List<(string sku, string url, bool is_primary)>(records.Count() * 2);
 
         foreach (var record in records)
         {
@@ -37,7 +37,7 @@ public class ImageService : IImageService
             {
                 if (kv.Key.StartsWith("image_url") && !string.IsNullOrWhiteSpace(kv.Value?.ToString()))
                 {
-                    tasks.Add((sku.ToString()?.ToLower(), kv.Value.ToString(), index == 0)!);
+                    ItemList.Add((sku.ToString()?.ToLower(), kv.Value.ToString(), index == 0)!);
                     index++;
                 }
             }
@@ -45,9 +45,9 @@ public class ImageService : IImageService
 
         List<Task>? taskList = new();
 
-        foreach (var task in tasks)
+        foreach (var item in ItemList)
         {
-            taskList.Add(ProcessUrlAsync(task, SkuIdDict, imageServiceDto, processedGlobalUrls));
+            taskList.Add(ProcessUrlAsync(item, SkuIdDict, imageServiceDto, processedGlobalUrls));
         }
 
         await Task.WhenAll(taskList);
@@ -69,8 +69,7 @@ public class ImageService : IImageService
 
         if (!IsValidUrl(url))
         {
-            _cache.Set(url, false, TimeSpan.FromHours(1));
-            LogError(imageServiceDto.ErrorMessageList, $"{sku}:Invalid url:{url}");
+            LogError(imageServiceDto, $"{sku}:Invalid url:{url}");
             return;
         }
         if (_cache.TryGetValue(url, out bool isCorrectUrl))
@@ -93,16 +92,14 @@ public class ImageService : IImageService
                             ResponseContent = response.Content
                         });
                     }
+                    return;
                 }
-                else
-                {
-                    processedGlobalUrls.TryAdd(url, true);
-                }
+                processedGlobalUrls.TryAdd(url, true);
 
             }
             else
             {
-                LogError(imageServiceDto.ErrorMessageList, $"{sku}:Image URL {url} failed to download");
+                LogError(imageServiceDto, $"{sku}:Image URL {url} failed to download");
             }
             return;
         }
@@ -139,12 +136,12 @@ public class ImageService : IImageService
             }
 
             _cache.Set(url, false, timeSpan);
-            LogError(imageServiceDto.ErrorMessageList, $"{sku}:Image URL {url} failed to download");
+            LogError(imageServiceDto, $"{sku}:Image URL {url} failed to download");
         }
         catch
         {
             _cache.Set(url, false, TimeSpan.FromHours(1));
-            LogError(imageServiceDto.ErrorMessageList, $"{sku}:Image URL {url} failed to download");
+            LogError(imageServiceDto, $"{sku}:Image URL {url} failed to download");
         }
     }
 
@@ -154,11 +151,11 @@ public class ImageService : IImageService
         byte[] hashBytes = SHA256.HashData(bytes);
         return Convert.ToHexString(hashBytes).ToLower();
     }
-    private static void LogError(HashSet<string> ErrorMessageList, string message)
+    private static void LogError(ImageServiceDto imageServiceDto, string message)
     {
-        lock (ErrorMessageList)
+        lock (imageServiceDto.ErrorMessageList)
         {
-            ErrorMessageList.Add(message);
+            imageServiceDto.ErrorMessageList.Add(message);
         }
     }
     private static void AddImage(ImageServiceDto imageServiceDto, int id, string imageFileName, bool is_primary)
